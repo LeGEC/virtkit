@@ -4,6 +4,14 @@ All notable changes to virtkit will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A guest on `init: image` (or `init: entrypoint`) with the default kernel now boots from
+  an image that has no `/lib/modules`.** The pinned kernel needs no module from the image,
+  but the boot still failed with `listing /lib/modules: /lib/modules: not found`. A slim
+  image with no kernel package no longer needs a placeholder directory. `kernel: image`
+  still requires `/lib/modules`, as before.
+
 ## [0.67.0] - 2026-09-10
 
 ### Added

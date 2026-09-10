@@ -70,7 +70,8 @@ pub struct FullVmBoot {
 /// own kernel is extracted to `kernel_out` and its boot-critical modules ride the
 /// initramfs; with [`KernelSource::Default`] or [`KernelSource::Path`] the boot runs
 /// on `pinned_kernel` (the caller's resolved pinned/explicit kernel, virtio + ext4
-/// built in) and no modules are gathered.
+/// built in) and no modules are gathered. That path does not read the image's
+/// `/lib/modules`, so an image with no kernel package boots on the pinned kernel.
 pub fn prepare(
     ext4: &Path,
     agent: &Path,
@@ -82,11 +83,13 @@ pub fn prepare(
 ) -> Result<FullVmBoot> {
     let reader =
         Ext4Reader::open(ext4).with_context(|| format!("opening image ext4 {}", ext4.display()))?;
-    let ver = kernel_version(&reader)?;
 
     let mut modules: Vec<(String, Vec<u8>)> = Vec::new();
     let mut load_order_abs: Vec<String> = Vec::new();
-    let kernel = if *kernel_source == KernelSource::Image {
+    // Only the image-kernel path reads modules from the image. Only that path needs
+    // the version that names their directory. Read the version in that path only.
+    let (kernel, ver) = if *kernel_source == KernelSource::Image {
+        let ver = kernel_version(&reader)?;
         // The image's kernel, reduced to a bare ELF vmlinux — libkrun's most reliable
         // load path. A distro `vmlinuz` is a bzImage whose payload is a compressed
         // vmlinux; Debian's is xz, which libkrun's own bzImage sniffing does not cover,
@@ -131,12 +134,13 @@ pub fn prepare(
             load_order_abs.push(format!("/lib/modules/{ver}/{ko_rel}"));
             modules.push((ko_rel, bytes));
         }
-        kernel_out.to_path_buf()
+        (kernel_out.to_path_buf(), ver)
     } else {
         // The pinned/explicit kernel has virtio + ext4 built in: no extraction, no
-        // module initramfs. The agent still rides the initramfs as /init for the pivot
-        // and (with --init image) the handoff.
-        pinned_kernel.to_path_buf()
+        // module initramfs, and no read of /lib/modules. The agent still rides the
+        // initramfs as /init for the pivot and (with --init image) the handoff. The
+        // module loop in the initramfs builder does not run, so the version is unused.
+        (pinned_kernel.to_path_buf(), String::new())
     };
 
     crate::initramfs::build_fullvm_initramfs(
@@ -372,6 +376,43 @@ fn resolve_module_paths(dep_text: &str, wanted: &[&str]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prepare_pinned_kernel_needs_no_modules_dir() {
+        // A slim image: an init and no /lib/modules. The pinned kernel must boot it,
+        // because that path loads no module from the image.
+        let tmp = std::env::temp_dir().join(format!("vk-fullvm-prepare-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let rootfs = tmp.join("rootfs");
+        std::fs::create_dir_all(rootfs.join("sbin")).unwrap();
+        std::fs::write(rootfs.join("sbin/init"), b"#!init").unwrap();
+        let ext4 = tmp.join("rootfs.ext4");
+        crate::ext4::build_from_dir(&rootfs, &ext4).unwrap();
+
+        let agent = tmp.join("agent");
+        std::fs::write(&agent, b"#!agent").unwrap();
+        let pinned = tmp.join("vmlinux");
+        std::fs::write(&pinned, b"pinned kernel").unwrap();
+        let kernel_out = tmp.join("kernel.out");
+        let initramfs_out = tmp.join("initramfs.cpio");
+
+        let boot = prepare(
+            &ext4,
+            &agent,
+            &kernel_out,
+            &initramfs_out,
+            None,
+            &KernelSource::Default,
+            &pinned,
+        )
+        .unwrap();
+        assert_eq!(boot.kernel, pinned);
+        assert_eq!(boot.initramfs, initramfs_out);
+        assert!(std::fs::metadata(&initramfs_out).unwrap().len() > 0);
+        // The pinned path extracts no kernel.
+        assert!(!kernel_out.exists());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 
     #[test]
     fn resolve_module_paths_orders_and_skips() {
