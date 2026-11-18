@@ -4,6 +4,28 @@ All notable changes to virtkit will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Every VM has a name, and every VM command takes it.** Dev environments are named
+  after their workspace, `vk run --name` names a run, and a `--state-dir` or `--detach`
+  run is named after what it boots. `vk rename` changes a name.
+- **`vk start`, `vk restart`, `vk rm` and `vk reset`.** They act on a VM by name, whatever
+  made it: a stopped run starts again with the arguments it was launched with, a dev
+  environment from its workspace, and `NAME/SERVICE` reaches a compose service.
+
+### Changed
+
+- **`vk list` lists every VM vk knows, one row each.** Stopped dev environments and named
+  runs are listed beside running VMs, each compose service has its own row, and rows are
+  grouped by project. `--running`, `--stopped` and `--kind` filter them. The first column
+  is the name the other commands take, and `--json` has one object per row.
+- **A directory names exactly one project's VMs.** `vk stop DIR`, `vk list DIR` and the
+  other commands no longer take the VMs of directories below unless `--recursive`. A bare
+  word is a VM name: write `./dir` for a directory.
+- **`vk status` is now `vk ping`**, and `vk publish --via` is now `--service`; the old
+  spellings still work. `vk paths` calls its root the data dir and shows where VMs keep
+  their state.
+
 ## [0.112.5] - 2026-11-17
 
 ### Fixed

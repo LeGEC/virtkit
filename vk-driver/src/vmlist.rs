@@ -301,8 +301,8 @@ pub fn render(rows: &[Row], home: Option<&Path>, wide: bool, stale: bool) -> Str
             });
             if stale {
                 row.push(match r.stale {
-                    Some(Some(true)) => "stale".into(),
-                    Some(Some(false)) => "fresh".into(),
+                    Some(Some(true)) => "yes".into(),
+                    Some(Some(false)) => "no".into(),
                     _ => dash(),
                 });
             }
@@ -447,6 +447,53 @@ mod tests {
             }),
             ["app/web"]
         );
+    }
+
+    /// The README's sample table, as the formatter lays it out.
+    fn readme_rows() -> String {
+        let mut shop = entry("/home/me/.local/state/virtkit/dev/shop-1a2b", "/home/me/shop", 41877, &["db", "redis"]);
+        shop.label = "devcontainer".into();
+        shop.mem = Some("16G".into());
+        shop.created_secs = 100_000 - 35 * 60;
+        let mut app = entry("/home/me/.local/state/virtkit/run/app-9f3c", "/home/me/app", 41230, &[]);
+        app.label = "app/Dockerfile:dev".into();
+        app.mem = Some("8G".into());
+        app.created_secs = 100_000 - (2 * 3600 + 14 * 60);
+        let mut scratch = entry("/home/me/.local/state/virtkit/run/scratch-77aa", "/home/me/tmp", 1, &[]);
+        scratch.label = "alpine".into();
+        let pg = (
+            crate::publish::Entry {
+                name: "pg".into(),
+                listen: "tcp://127.0.0.1:5432".into(),
+                to: "tcp://127.0.0.1:5432".into(),
+                service: Some("db".into()),
+                pid: 42011,
+                created_secs: 0,
+            },
+            crate::publish::Liveness::Held,
+        );
+        let mut shop_live = live(&shop, "shop", Kind::Dev, vec![unit("db", "running"), unit("redis", "stopped")]);
+        shop_live.mem_used = Some(6_335_076_761);
+        shop_live.published = vec![pg];
+        let mut app_live = live(&app, "app", Kind::Run, vec![]);
+        app_live.mem_used = Some(1_288_490_189);
+        let stopped = Known {
+            name: "scratch".into(),
+            dir: scratch.state_dir.clone(),
+            kind: Kind::Run,
+            last: Some(scratch.clone()),
+            project: None,
+            environment: None,
+        };
+        let rows = rows(&[shop_live, app_live], &[stopped], 100_000);
+        render(&rows, Some(Path::new("/home/me")), false, false)
+    }
+
+    #[test]
+    fn readme_table_sample_is_what_the_formatter_emits() {
+        let table = readme_rows();
+        let readme = include_str!("../../README.md");
+        assert!(readme.contains(&table), "README.md should hold:\n{table}");
     }
 
     #[test]

@@ -5334,7 +5334,7 @@ async fn cli_main(cli: Cli) -> ExitCode {
                 }
             }
             Ok(atop_attach::Target::Recorded(job)) => match atop::resolve(&ctx.cfg, &job) {
-                // Exit 2 for a job nothing answers to, like `vk status`/`list`/`stop` — a
+                // Exit 2 for a job nothing answers to, like `vk ping`/`list`/`stop` — a
                 // reader of the path must not be handed a success with no path.
                 Err(e) => fail(&e, 2),
                 // A recorded job names itself: its log sits in the directory the run made,
@@ -5448,7 +5448,7 @@ async fn cli_main(cli: Cli) -> ExitCode {
             }
         }
         // Run a command in a live guest, reproducing its exit status as our own. The target
-        // selects the VM the same way `vk status` does (directory via the registry, default cwd,
+        // selects the VM the same way `vk ping` does (a name, pid or directory, default cwd,
         // or a raw agent address); the command is the trailing `-- …` group.
         Cmd::Exec {
             target,
@@ -5494,7 +5494,7 @@ async fn cli_main(cli: Cli) -> ExitCode {
                     Err(e) => fail(&anyhow::anyhow!("{e}"), 1),
                 };
             }
-            // Resolution/usage errors exit 2, matching `vk status`/`vk list`/`vk stop` and
+            // Resolution/usage errors exit 2, matching `vk ping`/`vk list`/`vk stop` and
             // clap's own usage-error exit. Any vk-chosen code can collide with the remote
             // command's status vk reproduces below; 2 matches what the old CLI returned
             // when the positional address failed to parse.
@@ -6464,7 +6464,7 @@ fn broken_pipe(r: std::io::Result<()>) -> anyhow::Result<bool> {
     }
 }
 
-/// Resolve a `vk status`/`vk exec` target to the agent address to dial: a raw `scheme://…`
+/// Resolve a `vk ping`/`vk exec` target to the agent address to dial: a raw `scheme://…`
 /// address is used as-is; anything else (or nothing) is a directory selecting the VM through the
 /// registry, defaulting to the current directory.
 fn resolve_agent_addr(target: Option<&str>) -> anyhow::Result<SocketAddr> {
