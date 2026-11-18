@@ -156,9 +156,15 @@ pointing to `vk rm` / `vk reset`.
 7. start/stop/rm planning per kind (unit tests on the pure planner); `rm` never deletes an
    unmanaged dir.
 8. `vk ping`, `vk status` alias, `publish --service`, `vk paths` lines (CLI parse tests).
-9. vk-hub `/dev` works with names (hub tests with the fake `vk`).
+9. vk-hub keys a dev environment by `Workload.name`, falling back to its state dir's own
+   name, and the proto drops a `name` that is not one (unit tests in both crates).
 10. `cargo build`, `cargo clippy`, `cargo test` for vk-driver, vk-hub, vk-hub-proto pass.
 
 ## Open questions
 
 - Should unnamed foreground runs be registered under an automatic name later?
+- A dev environment stopped before this change lists no compose services until its next
+  boot writes `.virtkit-last.json`; reading them from `dev.json`'s compose manifest would fill
+  the gap.
+- A `vk run` that fails before its VM boots still leaves a named, stopped VM (as
+  `docker create` would); `vk rm` removes it.
