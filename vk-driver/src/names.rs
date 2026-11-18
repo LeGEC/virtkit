@@ -230,7 +230,7 @@ impl Index {
                 return Ok(());
             }
             bail!(
-                "the name {name} is taken by {} — `vk start {name}`, or `vk rm {name}` first",
+                "the name {name} is taken by {} — `vk start {name}`, or `vk delete {name}` first",
                 target.display()
             );
         }

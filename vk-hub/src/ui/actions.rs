@@ -1,6 +1,6 @@
 //! Operator actions on this machine's VMs use the same `vk` commands as a shell: stop or
 //! reboot a pinned run (`vk stop`, `vk reboot`), stop a dev environment (`vk stop`),
-//! restart it in its workspace (`vk dev up`), or remove it once stale (`vk rm`).
+//! restart it in its workspace (`vk dev up`), or remove it once stale (`vk delete`).
 //! CI jobs remain under their runner's control.
 //!
 //! Every action is a `POST` the UI's checks pass ([`super::check_post`]), done as the
@@ -179,7 +179,7 @@ fn dev_command(row: &DevRow, op: &str) -> Option<(Vec<OsString>, Duration)> {
         ),
         "gc" => (
             vec![
-                "rm".into(),
+                "delete".into(),
                 "--yes".into(),
                 "--".into(),
                 row.name.clone().into(),

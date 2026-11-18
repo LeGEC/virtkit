@@ -2325,7 +2325,7 @@ enum Cmd {
             help_heading = "Mounts and disks"
         )]
         state_dir: Option<PathBuf>,
-        /// name the VM, for `vk list`, `vk start`, `vk stop` and `vk rm`
+        /// name the VM, for `vk list`, `vk start`, `vk stop` and `vk delete`
         ///
         /// Without `--state-dir`, the VM gets a state dir of its own under
         /// `$XDG_STATE_HOME/virtkit/run`, kept after it stops so `vk start NAME` boots it again.
@@ -2520,7 +2520,7 @@ enum Cmd {
     /// `--detach`, and each of their compose services, grouped by project — a dev
     /// environment's workspace, a run's project directory (`--workspace`, then `--workdir`,
     /// then launch directory) — the primary first, then its services by name. NAME is what
-    /// `vk start`, `vk stop`, `vk rm` and every other VM command take (`NAME/SERVICE` for a
+    /// `vk start`, `vk stop`, `vk delete` and every other VM command take (`NAME/SERVICE` for a
     /// service; a running VM without a name shows its pid). MEM is what the VM's whole
     /// process tree holds on the host right now over the size it booted with (`1.2G/8G`) —
     /// the guest, its service VMs and their helpers, counted proportionally so pages they
@@ -2528,7 +2528,7 @@ enum Cmd {
     /// directory in full and the exec-channel address. With a REF, only the VMs it names; one
     /// that names exactly one running VM prints its full record instead of a table row. Use
     /// `--json` or `--field` for scripts.
-    #[command(display_order = 6)]
+    #[command(display_order = 6, visible_alias = "ls")]
     List {
         /// which VMs: a name, a pid, or those of a project directory (default: all)
         ///
@@ -2626,23 +2626,28 @@ enum Cmd {
         #[arg(long, default_value_t = 210, value_name = "SECS")]
         timeout: u64,
     },
-    /// Remove a stopped VM: its state, and its name
+    /// Delete a stopped VM: its state, and its name
     ///
-    /// A dev environment's state directory goes — storage, keys and all — after a preview
-    /// and a question (`--yes` skips it); a run's state directory goes when vk made it, and
-    /// only its recipe and name when it is a `--state-dir` of yours; a compose service's
-    /// `svc-<name>/` goes, so it starts afresh. A running VM is refused unless `--force`.
-    #[command(display_order = 8)]
-    Rm {
-        /// the VMs to remove, as `vk list` names them (`NAME/SERVICE` for a service)
+    /// A dev environment's state directory goes — storage, keys and all; a run's state
+    /// directory goes when vk made it, and only its recipe and name when it is a
+    /// `--state-dir` of yours; a compose service's `svc-<name>/` goes, so it starts afresh.
+    /// A running VM is refused unless `--force`. It lists what will go and asks first; with
+    /// no terminal to ask on it deletes nothing unless `--yes` or `--force`. If one REF
+    /// cannot be deleted, none is.
+    #[command(display_order = 8, visible_aliases = ["rm", "remove"])]
+    Delete {
+        /// the VMs to delete, as `vk list` names them (`NAME/SERVICE` for a service)
         #[arg(value_name = "REF", required = true)]
         targets: Vec<std::ffi::OsString>,
-        /// stop a running VM first
+        /// stop a running VM first; implies --yes
         #[arg(short = 'f', long)]
         force: bool,
-        /// remove a dev environment without asking
+        /// delete without asking
         #[arg(short = 'y', long)]
         yes: bool,
+        /// list what would be deleted, and delete nothing
+        #[arg(short = 'n', long)]
+        dry_run: bool,
         /// seconds to wait for a VM `--force` stops
         #[arg(long, default_value_t = 210, value_name = "SECS")]
         timeout: u64,
@@ -3083,7 +3088,7 @@ fn prepare_run_name(cmd: &mut Cmd) -> anyhow::Result<()> {
             crate::names::validate(n)?;
             if let Some(taken) = idx.lookup(n) {
                 anyhow::bail!(
-                    "the name {n} is taken by {} — `vk start {n}`, or `vk rm {n}` first",
+                    "the name {n} is taken by {} — `vk start {n}`, or `vk delete {n}` first",
                     taken.display()
                 );
             }
@@ -3763,27 +3768,16 @@ async fn cli_main(cli: Cli) -> ExitCode {
     }
     match &cli.cmd {
         Cmd::Start { targets, build } => {
-            return lifecycle::run(
-                lifecycle::Verb::Start { build: *build },
-                targets,
-                210,
-                false,
-            );
+            return lifecycle::run(lifecycle::Verb::Start { build: *build }, targets, 210);
         }
         Cmd::Restart { target, timeout } => return lifecycle::restart(target, *timeout),
-        Cmd::Rm {
+        Cmd::Delete {
             targets,
             force,
             yes,
+            dry_run,
             timeout,
-        } => {
-            return lifecycle::run(
-                lifecycle::Verb::Rm { force: *force },
-                targets,
-                *timeout,
-                *yes,
-            );
-        }
+        } => return lifecycle::delete(targets, *force, *yes, *dry_run, *timeout),
         Cmd::Reset { target, options } => {
             return match crate::dev::prune::run_by_name(target, options) {
                 Ok(report) => write_report(&report),
@@ -3809,7 +3803,6 @@ async fn cli_main(cli: Cli) -> ExitCode {
                 lifecycle::Verb::Stop,
                 std::slice::from_ref(target),
                 *timeout,
-                false,
             );
         }
         _ => {}
@@ -5716,7 +5709,7 @@ async fn cli_main(cli: Cli) -> ExitCode {
         | Cmd::List { .. }
         | Cmd::Start { .. }
         | Cmd::Restart { .. }
-        | Cmd::Rm { .. }
+        | Cmd::Delete { .. }
         | Cmd::Reset { .. }
         | Cmd::Rename { .. }
         | Cmd::Stop { .. }
@@ -8209,6 +8202,7 @@ mod tests {
                 "check",
                 "console",
                 "cp",
+                "delete",
                 "dev",
                 "exec",
                 "export",
@@ -8223,7 +8217,6 @@ mod tests {
                 "reset",
                 "restart",
                 "resume",
-                "rm",
                 "run",
                 "snapshot",
                 "ssh",

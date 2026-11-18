@@ -1957,7 +1957,7 @@ case "$1 $2" in
  {"name":"../evil","dir":"/x","workspace":null,"environment":null,"status":"stopped","flags":[]}]
 JSON
 ;;
-"dev up"|"rm --yes"|"stop --") ;;
+"dev up"|"delete --yes"|"stop --") ;;
 *) exit 3 ;;
 esac"#,
     );
@@ -2079,7 +2079,7 @@ esac"#,
     assert_eq!(reply.status, 200, "{}", reply.body);
     audited(
         &hub,
-        "`vk rm --yes -- old-2222` on dev environment old-2222 succeeded",
+        "`vk delete --yes -- old-2222` on dev environment old-2222 succeeded",
     )
     .await;
 

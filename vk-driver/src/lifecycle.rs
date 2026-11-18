@@ -110,7 +110,7 @@ pub enum Verb {
         build: bool,
     },
     Stop,
-    Rm {
+    Delete {
         force: bool,
     },
 }
@@ -156,7 +156,7 @@ pub fn plan(
         } else {
             Control { up: false }
         }],
-        (Verb::Rm { force }, service) => {
+        (Verb::Delete { force }, service) => {
             let up = match service {
                 None => primary_up,
                 Some(_) => primary_up && service_up,
@@ -165,7 +165,7 @@ pub fn plan(
             if up {
                 if !force {
                     bail!(
-                        "{} is running — `vk stop {}` first, or `vk rm -f`",
+                        "{} is running — `vk stop {}` first, or `vk delete -f`",
                         t.shown(),
                         t.shown()
                     );
@@ -235,7 +235,7 @@ fn vk(args: &[String], cwd: Option<&Path>, from_recipe: bool) -> Result<()> {
 }
 
 /// Carry out `steps` on `t`. A start boots only what is already built, unless `build`.
-fn execute(t: &Target, steps: &[Step], timeout: u64, yes: bool, build: bool) -> Result<String> {
+fn execute(t: &Target, steps: &[Step], timeout: u64, build: bool) -> Result<String> {
     let start = if build { "up" } else { "start" };
     let mut out = String::new();
     for step in steps {
@@ -326,7 +326,8 @@ fn execute(t: &Target, steps: &[Step], timeout: u64, yes: bool, build: bool) -> 
             }
             Step::DevRemove => {
                 let dir_name = t.dir.file_name().unwrap_or_default().to_string_lossy();
-                let code = crate::dev::cli::dev_gc(yes, false, &[dir_name.into_owned()], false);
+                // `vk delete` asked already (or was told not to): no second question.
+                let code = crate::dev::cli::dev_gc(true, false, &[dir_name.into_owned()], false);
                 if code != ExitCode::SUCCESS {
                     bail!("{} was not removed", t.name);
                 }
@@ -390,8 +391,8 @@ fn service_up(entry: Option<&VmEntry>, name: Option<&str>) -> bool {
     })
 }
 
-/// `vk start|stop|rm` on each REF in turn; the exit status says whether every one did.
-pub fn run(verb: Verb, refs: &[std::ffi::OsString], timeout: u64, yes: bool) -> ExitCode {
+/// `vk start|stop` on each REF in turn; the exit status says whether every one did.
+pub fn run(verb: Verb, refs: &[std::ffi::OsString], timeout: u64) -> ExitCode {
     let build = matches!(verb, Verb::Start { build: true });
     let mut ok = true;
     for r in refs {
@@ -399,7 +400,7 @@ pub fn run(verb: Verb, refs: &[std::ffi::OsString], timeout: u64, yes: bool) -> 
             let entry = running_on(&t.dir);
             let up = service_up(entry.as_ref(), t.service.as_deref());
             let steps = plan(verb, &t, entry.is_some(), up, managed(&t.dir))?;
-            execute(&t, &steps, timeout, yes, build)
+            execute(&t, &steps, timeout, build)
         });
         match result {
             Ok(report) => print!("{report}"),
@@ -416,15 +417,155 @@ pub fn run(verb: Verb, refs: &[std::ffi::OsString], timeout: u64, yes: bool) -> 
     }
 }
 
+/// Whether `vk delete` goes ahead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Gate {
+    /// `--dry-run`: say what would go, remove nothing
+    DryRun,
+    /// ask on the terminal first
+    Ask,
+    /// `--yes` or `--force`: remove without asking
+    Go,
+    /// no terminal to ask on, and neither `--yes` nor `--force`
+    Refuse,
+}
+
+/// How `vk delete` proceeds, given its flags and whether a terminal can answer.
+pub fn gate(yes: bool, force: bool, dry_run: bool, on_terminal: bool) -> Gate {
+    match (dry_run, yes || force, on_terminal) {
+        (true, _, _) => Gate::DryRun,
+        (false, true, _) => Gate::Go,
+        (false, false, true) => Gate::Ask,
+        (false, false, false) => Gate::Refuse,
+    }
+}
+
+impl Step {
+    /// What this step would do to `t`, as `vk delete` lists it before it acts.
+    pub fn describe(&self, t: &Target) -> String {
+        let name = t.shown();
+        let dir = t.dir.display();
+        match self {
+            Step::Nothing(what) => what.clone(),
+            Step::DevStop
+            | Step::RunStop
+            | Step::Control { up: false }
+            | Step::DevService { up: false } => format!("stop {name}"),
+            Step::DevRemove => {
+                format!("delete dev environment {name}: its state dir {dir}, storage and all")
+            }
+            Step::RemoveDir => format!("delete {name}: its state dir {dir}"),
+            Step::Forget => {
+                format!("forget {name}: its recipe and name go, its state dir {dir} (yours) stays")
+            }
+            Step::RemoveService => format!(
+                "delete {name}: {}",
+                t.dir
+                    .join(format!("svc-{}", t.service.as_deref().unwrap_or_default()))
+                    .display()
+            ),
+            Step::DevUp
+            | Step::Replay
+            | Step::Control { up: true }
+            | Step::DevService { up: true } => format!("start {name}"),
+        }
+    }
+}
+
+/// `vk delete REF…`: every REF is resolved and planned first, so one that cannot go (no such
+/// VM, or running without `--force`) leaves every other one in place. Then, per `gate`, what
+/// would go is listed (`--dry-run`), asked about, refused, or removed.
+pub fn delete(
+    refs: &[std::ffi::OsString],
+    force: bool,
+    yes: bool,
+    dry_run: bool,
+    timeout: u64,
+) -> ExitCode {
+    let mut planned = Vec::new();
+    let mut ok = true;
+    for r in refs {
+        let result = resolve(r).and_then(|t| {
+            let entry = running_on(&t.dir);
+            let up = service_up(entry.as_ref(), t.service.as_deref());
+            let steps = plan(
+                Verb::Delete { force },
+                &t,
+                entry.is_some(),
+                up,
+                managed(&t.dir),
+            )?;
+            Ok((t, steps))
+        });
+        match result {
+            Ok(p) => planned.push(p),
+            Err(e) => {
+                eprintln!("vk: {e:#}");
+                ok = false;
+            }
+        }
+    }
+    let list: String = planned
+        .iter()
+        .flat_map(|(t, steps)| steps.iter().map(move |s| format!("  {}\n", s.describe(t))))
+        .collect();
+    let gate = gate(yes, force, dry_run, crate::dev::on_terminal());
+    if gate == Gate::DryRun {
+        print!("would:\n{list}");
+        return if ok {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::from(1)
+        };
+    }
+    if !ok {
+        eprintln!("vk: nothing was deleted");
+        return ExitCode::from(1);
+    }
+    match gate {
+        Gate::Refuse => {
+            eprint!(
+                "vk delete would:\n{list}vk: nothing was deleted: not on a terminal to ask, \
+                 so pass --yes (or --force)\n"
+            );
+            return ExitCode::from(1);
+        }
+        Gate::Ask => {
+            eprint!("vk delete will:\n{list}");
+            match crate::dev::ask_on_terminal("go ahead?") {
+                Ok(true) => {}
+                Ok(false) => {
+                    eprintln!("vk: nothing was deleted");
+                    return ExitCode::from(1);
+                }
+                Err(e) => {
+                    eprintln!("vk: {e:#}");
+                    return ExitCode::from(1);
+                }
+            }
+        }
+        Gate::Go | Gate::DryRun => {}
+    }
+    for (t, steps) in &planned {
+        match execute(t, steps, timeout, false) {
+            Ok(report) => print!("{report}"),
+            Err(e) => {
+                eprintln!("vk: {e:#}");
+                ok = false;
+            }
+        }
+    }
+    if ok {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    }
+}
+
 /// `vk restart REF`: stop, then start.
 pub fn restart(r: &OsStr, timeout: u64) -> ExitCode {
-    match run(Verb::Stop, &[r.to_os_string()], timeout, false) {
-        ExitCode::SUCCESS => run(
-            Verb::Start { build: false },
-            &[r.to_os_string()],
-            timeout,
-            false,
-        ),
+    match run(Verb::Stop, &[r.to_os_string()], timeout) {
+        ExitCode::SUCCESS => run(Verb::Start { build: false }, &[r.to_os_string()], timeout),
         code => code,
     }
 }
@@ -558,7 +699,7 @@ mod tests {
         use Step::*;
         assert!(
             plan(
-                Verb::Rm { force: false },
+                Verb::Delete { force: false },
                 &target(Kind::Run, None),
                 true,
                 false,
@@ -567,12 +708,19 @@ mod tests {
             .is_err()
         );
         assert_eq!(
-            steps(Verb::Rm { force: true }, Kind::Run, None, true, false, true),
+            steps(
+                Verb::Delete { force: true },
+                Kind::Run,
+                None,
+                true,
+                false,
+                true
+            ),
             [RunStop, RemoveDir]
         );
         assert_eq!(
             steps(
-                Verb::Rm { force: false },
+                Verb::Delete { force: false },
                 Kind::Run,
                 None,
                 false,
@@ -583,7 +731,7 @@ mod tests {
         );
         assert_eq!(
             steps(
-                Verb::Rm { force: false },
+                Verb::Delete { force: false },
                 Kind::Dev,
                 None,
                 false,
@@ -594,7 +742,7 @@ mod tests {
         );
         assert_eq!(
             steps(
-                Verb::Rm { force: false },
+                Verb::Delete { force: false },
                 Kind::Run,
                 Some("db"),
                 true,
@@ -605,7 +753,7 @@ mod tests {
         );
         assert!(
             plan(
-                Verb::Rm { force: false },
+                Verb::Delete { force: false },
                 &target(Kind::Run, Some("db")),
                 true,
                 true,
@@ -613,5 +761,39 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    /// `--dry-run` wins; `--yes` or `--force` go ahead; otherwise a terminal is asked, and
+    /// without one nothing is deleted.
+    #[test]
+    fn delete_asks_on_a_terminal_and_refuses_without_one() {
+        for term in [true, false] {
+            for (y, f) in [(false, false), (true, false), (false, true), (true, true)] {
+                assert_eq!(gate(y, f, true, term), Gate::DryRun);
+            }
+            assert_eq!(gate(true, false, false, term), Gate::Go);
+            assert_eq!(gate(false, true, false, term), Gate::Go);
+        }
+        assert_eq!(gate(false, false, false, true), Gate::Ask);
+        assert_eq!(gate(false, false, false, false), Gate::Refuse);
+    }
+
+    /// The list shown before a delete names what goes, and what stays.
+    #[test]
+    fn delete_steps_say_what_goes() {
+        use Step::*;
+        let run = target(Kind::Run, None);
+        assert_eq!(RunStop.describe(&run), "stop app");
+        assert_eq!(RemoveDir.describe(&run), "delete app: its state dir /s/app");
+        assert!(Forget.describe(&run).contains("/s/app (yours) stays"));
+        let dev = target(Kind::Dev, None);
+        assert!(
+            DevRemove
+                .describe(&dev)
+                .starts_with("delete dev environment app")
+        );
+        let svc = target(Kind::Run, Some("db"));
+        assert_eq!(RemoveService.describe(&svc), "delete app/db: /s/app/svc-db");
+        assert_eq!(Control { up: false }.describe(&svc), "stop app/db");
     }
 }

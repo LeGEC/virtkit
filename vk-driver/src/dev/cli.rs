@@ -739,7 +739,7 @@ async fn dev_action(
         Ok(l) => l,
         Err(e) if matches!(action, DevAction::Gc { .. }) => {
             let e = e.context(
-                "`vk dev gc` takes this workspace's environments; `vk rm NAME` removes any VM, \
+                "`vk dev gc` takes this workspace's environments; `vk delete NAME` removes any VM, \
                  and --all-stale those whose workspace is gone",
             );
             return fail(&e, 2);
@@ -794,7 +794,7 @@ async fn dev_action(
             }
         }
         DevAction::Gc { yes, names, .. } if !names.is_empty() => {
-            match in_scope(&plan, &names, "vk rm") {
+            match in_scope(&plan, &names, "vk delete") {
                 Ok(()) => dev_gc(yes, false, &names, false),
                 Err(code) => code,
             }
