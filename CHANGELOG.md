@@ -8,7 +8,8 @@ All notable changes to virtkit will be documented in this file.
 
 - **Every VM has a name, and every VM command takes it.** Dev environments are named
   after their workspace, `vk run --name` names a run, and a `--state-dir` or `--detach`
-  run is named after what it boots. `vk rename` changes a name.
+  run is named after what it boots (compose up, which boots no primary, stays unnamed).
+  `vk rename` changes a name.
 - **`vk start`, `vk restart`, `vk rm` and `vk reset`.** They act on a VM by name, whatever
   made it: a stopped run starts again with the arguments it was launched with, a dev
   environment from its workspace, and `NAME/SERVICE` reaches a compose service.

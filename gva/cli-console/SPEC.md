@@ -78,6 +78,9 @@ No REF means the current directory, exact project match. `--service S` stays and
   `X` already naming another dir is an error (`vk start X` or `vk rm X`).
 - `vk run --detach` with neither `--name` nor `--state-dir` gets an automatic name and a managed
   dir, so every background VM is registered.
+- Compose up (`--compose` with no image, `-f` or `--primary`) registers no VM, so it is never
+  named: a name would list it stopped while it runs and `vk start` would boot a second
+  fleet. `--name` on it is refused.
 - `vk run --state-dir D` without `--name` gets an automatic name unless `D` has one.
 - The CLI `vk run` path (not `vk dev`, not the executor) writes `<state dir>/run.json`: the
   argv after `run`, the working directory and the project directory. `vk start` replays it

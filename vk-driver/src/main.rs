@@ -2329,7 +2329,8 @@ enum Cmd {
         ///
         /// Without `--state-dir`, the VM gets a state dir of its own under
         /// `$XDG_STATE_HOME/virtkit/run`, kept after it stops so `vk start NAME` boots it again.
-        /// A `--state-dir` or `--detach` run without a name gets one from what it boots.
+        /// A `--state-dir` or `--detach` run without a name gets one from what it boots;
+        /// compose up, which boots no primary VM, takes none.
         #[arg(long, value_name = "NAME", help_heading = "Detach")]
         name: Option<String>,
         /// with --compose, the workspace root it reads as `${VK_WORKSPACE}` [default: the cwd]
@@ -3041,6 +3042,8 @@ fn prepare_run_name(cmd: &mut Cmd) -> anyhow::Result<()> {
         state_dir,
         detach,
         image,
+        file,
+        compose,
         primary,
         target,
         workspace,
@@ -3050,6 +3053,17 @@ fn prepare_run_name(cmd: &mut Cmd) -> anyhow::Result<()> {
     else {
         return Ok(());
     };
+    if compose.is_some() && boots_no_primary(image.as_deref(), file, primary.as_deref()) {
+        // Compose up registers nothing: a name would list it stopped while it runs, and
+        // `vk start` would boot a second fleet beside it.
+        if let Some(n) = name {
+            anyhow::bail!(
+                "--name {n}: compose up (no image, -f or --primary) boots no VM to name; \
+                 give it a primary, or leave the name out"
+            );
+        }
+        return Ok(());
+    }
     if name.is_none() && state_dir.is_none() && !*detach {
         return Ok(());
     }
@@ -3113,6 +3127,12 @@ fn run_state_dir(dir: &Path) -> anyhow::Result<PathBuf> {
 fn new_run_dir(base: &str) -> anyhow::Result<PathBuf> {
     let token = &detach::nonce()[..8];
     run_state_dir(&crate::names::run_base()?.join(format!("{base}-{token}")))
+}
+
+/// Whether a run boots compose services only: no image, Dockerfile or `--primary` to make a
+/// primary VM of.
+fn boots_no_primary(image: Option<&str>, file: &[PathBuf], primary: Option<&str>) -> bool {
+    file.is_empty() && image.is_none() && primary.is_none()
 }
 
 /// What an unnamed run is called after: the compose primary, the Dockerfile target, the
@@ -3987,7 +4007,7 @@ async fn cli_main(cli: Cli) -> ExitCode {
         name: _,
     } = &cli.cmd
     {
-        let services_only = file.is_empty() && image.is_none() && primary.is_none();
+        let services_only = boots_no_primary(image.as_deref(), file, primary.as_deref());
         if services_only && compose.is_none() {
             return fail(
                 &anyhow::anyhow!("run needs an image, --file <Dockerfile>, or a --compose file"),
@@ -8230,6 +8250,31 @@ mod tests {
         );
         assert_eq!(auto_name_base(None, None, Some("dev")), "dev");
         assert_eq!(auto_name_base(None, None, None), "vm");
+    }
+
+    /// Compose up registers no VM, so it gets no name: detached it stays unnamed, and an
+    /// explicit name is refused rather than left listed as a stopped VM.
+    #[test]
+    fn compose_up_is_never_named() {
+        let cmd = |args: &[&str]| {
+            let mut cli = Cli::try_parse_from(["vk", "run"].iter().chain(args)).unwrap();
+            prepare_run_name(&mut cli.cmd).map(|()| cli.cmd)
+        };
+        let Cmd::Run {
+            name, state_dir, ..
+        } = cmd(&["--compose", "c.yml", "--detach"]).unwrap()
+        else {
+            panic!("not a run");
+        };
+        assert_eq!((name, state_dir), (None, None));
+        let Err(err) = cmd(&["--compose", "c.yml", "--name", "x"]) else {
+            panic!("named");
+        };
+        assert!(format!("{err}").contains("compose up"), "{err}");
+        assert!(boots_no_primary(None, &[], None));
+        assert!(!boots_no_primary(None, &[], Some("web")));
+        assert!(!boots_no_primary(Some("alpine"), &[], None));
+        assert!(!boots_no_primary(None, &["Dockerfile".into()], None));
     }
 
     #[test]

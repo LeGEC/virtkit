@@ -558,7 +558,8 @@ Every VM `vk` remembers has a **name**: a dev environment (named after its works
 added for an environment other than `dev`), and a `vk run` started with `--name`,
 `--state-dir` or `--detach` (named with `--name`, else after what it boots). A name is
 given once and kept; a second `app` becomes `app-2`, and `vk rename` changes it. A
-foreground `vk run` without `--state-dir` stays nameless and is forgotten when it ends.
+foreground `vk run` without `--state-dir` stays nameless and is forgotten when it ends, as
+does compose up (`--compose` with no image, `-f` or `--primary`), which boots no VM to name.
 
 ```sh
 vk run --name app --detach --ssh -f Dockerfile --target dev
