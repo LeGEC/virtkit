@@ -49,6 +49,10 @@ untouched tree too (see papercuts.md).
    every_action_says_whether_it_boots…}`, `fleetctl::tests::a_start_is_cached_only…`,
    vk-hub `dev_environments_are_started_stopped_and_cleaned_up`. Status: done; not verified
    against a booting VM.
+8d. **`vk delete`** — `Cmd::Delete` (aliases `rm`, `remove`), `-n/--dry-run`, `-y`, `-f`;
+   every REF is resolved and planned before anything goes (`lifecycle::delete`, pure `gate`,
+   `Step::describe`); `vk ls` aliases `vk list`; vk-hub runs `vk delete --yes`.
+   Tests: `lifecycle::tests` (gate, describe). Status: done.
 9. **Docs** — README VM section (table pinned by `vmlist::tests::readme_table_sample…`),
    overview rows, docs/dev.md, CHANGELOG, `tests/dev-e2e.sh` (`vk list --running`).
    Status: done.

@@ -4,7 +4,7 @@
 
 Give every VM `vk` knows a short, stable **name**, accept the same **REF** in every command
 that acts on a VM, list every known VM — running or stopped, primary or compose service — in
-one `vk list`, and offer `vk start | stop | restart | rm REF` at the top level so a name shown
+one `vk list`, and offer `vk start | stop | restart | delete REF` at the top level so a name shown
 by `vk list` works with all of them.
 
 ## Context
@@ -38,8 +38,8 @@ by `vk list` works with all of them.
   truth: dir → name is a scan of the index (tens of entries). A `names/.lock` flock serializes
   claims so one directory never gets two names.
 - A name is chosen once and kept. On collision the base gets `-2`, `-3`, …
-- `vk rename OLD NEW` moves the link. `rm` releases it. A link whose target is gone is skipped
-  by readers and removed by `vk rm NAME`.
+- `vk rename OLD NEW` moves the link. `delete` releases it. A link whose target is gone is skipped
+  by readers and removed by `vk delete NAME`.
 
 Default names:
 
@@ -75,7 +75,7 @@ No REF means the current directory, exact project match. `--service S` stays and
 
 - `vk run --name X`: without `--state-dir`, the state dir is a managed
   `$XDG_STATE_HOME/virtkit/run/X-<8 hex>`. With `--state-dir D`, `X` names `D`.
-  `X` already naming another dir is an error (`vk start X` or `vk rm X`).
+  `X` already naming another dir is an error (`vk start X` or `vk delete X`).
 - `vk run --detach` with neither `--name` nor `--state-dir` gets an automatic name and a managed
   dir, so every background VM is registered.
 - Compose up (`--compose` with no image, `-f` or `--primary`) registers no VM, so it is never
@@ -105,7 +105,7 @@ no row; `vk start VM/SERVICE` still accepts it.
 - Order: grouped by project (dev: workspace; run: project dir), groups by path; within a group
   dev environments then runs, each primary followed by its services by name.
 - `--running` / `--stopped` (conflicting) filter rows; `--kind dev|run|service`.
-- `--json` is an array of these rows; `--field` selects from them.
+- `--json` is an array of these rows; `--field` selects from them. `vk ls` is an alias.
 - A REF selecting exactly one primary prints its detail record, as before.
 - Unnamed running VMs (registered before this change) show their PID as NAME.
 - `vk dev list` stays the per-environment storage view (sizes, flags, `gc` staleness); its
@@ -118,13 +118,16 @@ no row; `vk start VM/SERVICE` still accepts it.
 | `start` | `vk dev --workspace W --environment E start` (child process) | replay `run.json` with `--require-cached` | start the primary if stopped, then control-socket `Start { cached }` (dev: `vk dev start --service S`) |
 | `stop` | `dev::stop` (as `vk dev stop`) | existing `stop_one` | control-socket `Stop` (dev: `vk dev stop --service S`) |
 | `restart` | stop, then start | same | same |
-| `rm [-f]` | `dev::list::remove` (as `vk dev gc`) | delete a managed dir; for a user dir delete `run.json` and `.virtkit-last.json` only | delete `svc-<name>/` while stopped |
+| `delete [-f]` (aliases `rm`, `remove`) | `dev::list::remove` (as `vk dev gc`) | delete a managed dir; for a user dir delete `run.json` and `.virtkit-last.json` only | delete `svc-<name>/` while stopped |
 | `reset` | `vk dev prune` options | refused | refused |
 
 `start` boots only what is built; `vk start --build` builds what is missing, as `up` does.
-`rm` refuses a running VM unless `-f`, which stops it first, and releases the name.
+`delete` refuses a running VM unless `-f`, which stops it first, and releases the name. It
+asks before it removes anything when on a terminal and fails otherwise, unless `-y` or `-f`;
+`-n/--dry-run` lists what it would remove. Every REF is resolved and planned first: if one
+fails, none is deleted.
 `vk dev gc NAME` and `vk dev prune NAME` keep working and also accept names; they print a note
-pointing to `vk rm` / `vk reset`.
+pointing to `vk delete` / `vk reset`.
 
 ### `vk dev` verbs and workspace scope (S7)
 
@@ -145,7 +148,7 @@ pointing to `vk rm` / `vk reset`.
   repeatable) says which.
 - `vk dev` acts on its workspace only. A name that is a VM of another workspace is refused
   (exit 2); on a terminal the error names the global command (`vk stop NAME`, `vk start
-  NAME`, `vk start --build NAME`, `vk restart NAME`, `vk rm NAME`, `vk reset NAME`).
+  NAME`, `vk start --build NAME`, `vk restart NAME`, `vk delete NAME`, `vk reset NAME`).
   `vk dev gc NAME` and `vk dev prune NAME` follow the same rule; `gc --all-stale` stays
   host-wide.
 - With NAMEs the command boots nothing in its own process: an environment that has to come
@@ -165,7 +168,7 @@ pointing to `vk rm` / `vk reset`.
 - `Workload` gains an optional `name`. vk fills it; the hub keys dev rows by `name`, falling
   back to the state-dir basename.
 - `vk dev list --json` `name` is the environment name; the hub passes it to `vk stop` and
-  `vk rm --yes`, which accept it from anywhere (`vk dev stop/gc` are scoped to a workspace).
+  `vk delete --yes`, which accept it from anywhere (`vk dev stop/gc` are scoped to a workspace).
 
 ## Rejected alternatives
 
@@ -194,7 +197,7 @@ pointing to `vk rm` / `vk reset`.
    the preparation function).
 6. `vk list` rows: grouping, order, services, stopped VMs, filters, services without a VM
    left out (unit tests on the pure row builder).
-7. start/stop/rm planning per kind (unit tests on the pure planner); `rm` never deletes an
+7. start/stop/delete planning per kind (unit tests on the pure planner); `delete` never deletes an
    unmanaged dir.
 8. `vk ping`, `vk status` alias, `publish --service`, `vk paths` lines (CLI parse tests).
 9. vk-hub keys a dev environment by `Workload.name`, falling back to its state dir's own
@@ -204,7 +207,9 @@ pointing to `vk rm` / `vk reset`.
     a named stop or gc of another workspace's VM is refused (CLI tests); `down` parses as
     `stop`; only a bare `up`/`start` boots in-process (`boots()` table).
 11. `Start.cached` is left out when false and defaults to false (vk-core test).
-12. vk-hub runs `vk stop` and `vk rm --yes` for dev environments (vk-hub tests).
+12. vk-hub runs `vk stop` and `vk delete --yes` for dev environments (vk-hub tests).
+12b. `vk delete` gate: dry run, ask, go, refuse, for each combination of `-y`/`-f`/`-n` and
+    terminal (unit tests on the pure gate); step descriptions (unit tests).
 13. `cargo build`, `cargo clippy`, `cargo test` for vk-driver, vk-hub, vk-hub-proto pass.
 
 ## Open questions
@@ -220,4 +225,4 @@ pointing to `vk rm` / `vk reset`.
   boot writes `.virtkit-last.json`; reading them from `dev.json`'s compose manifest would fill
   the gap.
 - A `vk run` that fails before its VM boots still leaves a named, stopped VM (as
-  `docker create` would); `vk rm` removes it.
+  `docker create` would); `vk delete` removes it.

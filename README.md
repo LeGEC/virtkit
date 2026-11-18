@@ -614,7 +614,8 @@ vk start app                  # a stopped run again, from the recipe it recorded
 vk start shop/redis           # a compose service, starting its VM first if needed
 vk stop shop                  # a dev environment: as `vk dev stop`
 vk restart app
-vk rm scratch                 # a stopped VM's state, and its name
+vk delete scratch             # a stopped VM's state, and its name (asks first)
+vk delete -n scratch shop/db  # only list what would go
 vk rename app web
 vk reset shop --storage       # a dev environment's persistent data, as `vk dev prune`
 ```
@@ -622,10 +623,14 @@ vk reset shop --storage       # a dev environment's persistent data, as `vk dev 
 `vk start` boots a dev environment from its workspace's config (as `vk dev start` there), a
 run from `run.json` in its state dir — the same `vk run` arguments in the same directory, now
 in the background — and a compose service in its VM. It boots only what is built: an image
-that would have to be built fails the start (exit 3), and `--build` builds it instead. `vk rm` refuses a running VM unless
-`--force`; it removes a dev environment's state dir after a preview and a question (`--yes`
-skips it), a run's state dir when `vk` made it, and only the recipe and name of a
-`--state-dir` of yours. `vk rm NAME/SERVICE` empties the service's `svc-<name>/`.
+that would have to be built fails the start (exit 3), and `--build` builds it instead.
+
+`vk delete` (also `rm`, `remove`) removes a dev environment's state dir, a run's state dir
+when `vk` made it, and only the recipe and name of a `--state-dir` of yours;
+`vk delete NAME/SERVICE` empties the service's `svc-<name>/`. It refuses a running VM unless
+`--force`, which stops it first. It lists what will go and asks on a terminal; without one
+it deletes nothing unless `-y`/`--yes` or `-f`. `-n`/`--dry-run` only lists. If one REF
+cannot be deleted, none is. `vk ls` is `vk list`.
 
 A REF that names exactly one running VM makes `vk list` print its full record instead of a
 table row: every recorded fact, then each compose service as name, state, LAN address and
@@ -943,7 +948,7 @@ rebuilt byte-for-byte — see [Build from source](#build-from-source).
 | `vk build` | Build Dockerfile stages into a bootable ext4 image or caller-owned disk, or a Windows Dockerfile into a bundle. |
 | `vk exec` | Run a command in an existing guest and return the command's exit status. |
 | `vk list` | List every VM vk knows — running or stopped, dev environments, named runs and their compose services — one row each; `--running`/`--stopped`, `--kind`, `-w` for the full table, `--json`/`--field` for scripts. |
-| `vk start`, `vk stop`, `vk restart`, `vk rm`, `vk rename` | Start, stop, restart, remove or rename a VM by the name `vk list` prints (`NAME/SERVICE` for a service); `vk stop` also takes a pid or directory, or `--all`. |
+| `vk start`, `vk stop`, `vk restart`, `vk delete`, `vk rename` | Start, stop, restart, delete or rename a VM by the name `vk list` prints (`NAME/SERVICE` for a service); `vk stop` also takes a pid or directory, or `--all`. |
 | `vk reboot` | Reboot a running VM in place through its guest, or power-cycle it with `--force`. |
 | `vk ping` | Probe a guest agent, or report whether its root image is stale (`vk status` is the same). |
 | `vk logs` | Show a VM's console log, telling kernel, agent and guest output apart; `--level warn`, `--agent`, `--service NAME`, `-f`. |

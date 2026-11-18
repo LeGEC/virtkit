@@ -37,3 +37,8 @@
   command boots nothing itself and runs a child `vk dev --environment E up|start`.
 - Removed tests that pinned the host-wide `vk dev stop NAME` / `gc NAME`; replaced by
   scope tests.
+- vmlist agent: `vk rm` became `vk delete` (aliases `rm`, `remove`): it resolves and plans
+  every REF first, then lists, asks on a terminal, and refuses without `-y`/`-f` otherwise;
+  `-n/--dry-run` only lists. `vk ls` aliases `vk list`. Committed as 0f5921f6, with the
+  `vk list` service rows as dfeb30f9. The session then handed off: main is the only agent.
+  Smoke-tested there: `ls`, `-n`, refusal without a tty, the prompt through script(1), `-y`.

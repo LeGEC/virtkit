@@ -605,15 +605,15 @@ vk dev gc
 `list` and `gc --all-stale` work from anywhere without a project config. `gc`
 reads the config: bare, like `stop`, it takes this workspace's environment, not its
 task leftovers (if that environment has no state, it reports nothing to remove), and
-`gc NAME` takes environments of this workspace only. `vk rm NAME` removes a VM of
+`gc NAME` takes environments of this workspace only. `vk delete NAME` removes a VM of
 any workspace, including one whose workspace is gone. NAME is the environment's VM name: its
 workspace's directory name, with `-ENV` for an environment other than `dev`, and
 `-2`, `-3`… when another workspace already has it — given once, on the first
 command that lists it, and kept (`vk rename` changes it). The same name works with
-`vk start`, `vk stop`, `vk rm` and every other VM command, and `vk list` shows the
+`vk start`, `vk stop`, `vk delete` and every other VM command, and `vk list` shows the
 environment's compose services beside it. A state directory's own name
 (`app-3f9c0d1e2a4b5c6d`, the `dir_name` of `--json`) still names it, and a task's
-leftover, which has no name, goes by that alone. `vk rm NAME` is `vk dev gc NAME`. The `MEM` column
+leftover, which has no name, goes by that alone. `vk delete NAME` is `vk dev gc NAME` from anywhere. The `MEM` column
 shows what a running environment's VM holds on the host now over the size it
 booted with (`1.2G/8G`), the same figure `vk list` reports; a stopped
 environment reads `-`, and `mem_used_bytes` in `--json` is null for it. `gc`
@@ -981,5 +981,5 @@ individual options.
 | `storage list`, `storage reset NAME` | Inspect storage or destroy a durable item's data. |
 | `prune [NAME]` | Remove local boot images or select `--storage` / `--all`; `--dry-run`, `--yes`. `NAME`: an environment of this workspace (`vk reset NAME` for any). Requires a stopped environment. |
 | `list` | Host-wide environment inventory (on-disk sizes by default); `--no-sizes`, `--json`. |
-| `gc [NAME…]` | Remove stopped state of this workspace's environments (bare: the current one; `vk rm NAME` for any); `--all-stale` (host-wide), `--yes`. |
+| `gc [NAME…]` | Remove stopped state of this workspace's environments (bare: the current one; `vk delete NAME` for any); `--all-stale` (host-wide), `--yes`. |
 | `schema` | Print the configuration JSON Schema. |

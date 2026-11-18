@@ -10,9 +10,12 @@ All notable changes to virtkit will be documented in this file.
   after their workspace, `vk run --name` names a run, and a `--state-dir` or `--detach`
   run is named after what it boots (compose up, which boots no primary, stays unnamed).
   `vk rename` changes a name.
-- **`vk start`, `vk restart`, `vk rm` and `vk reset`.** They act on a VM by name, whatever
+- **`vk start`, `vk restart`, `vk delete` and `vk reset`.** They act on a VM by name, whatever
   made it: a stopped run starts again with the arguments it was launched with, a dev
   environment from its workspace, and `NAME/SERVICE` reaches a compose service.
+  `vk delete` (aliases `rm`, `remove`) asks before it removes anything on a terminal and
+  removes nothing without `-y` or `-f` otherwise; `--dry-run` shows what it would remove.
+  `vk ls` lists VMs.
 - **`vk dev start`, `vk dev restart` and `vk dev down`.** `start` boots an environment
   again from what is already built and never builds (exit 3 when it would have to);
   `down` is `stop`. `vk dev up | start | stop | restart` take the names of compose
@@ -32,7 +35,7 @@ All notable changes to virtkit will be documented in this file.
   fails with exit 3 when an image would have to be built: `vk start --build` builds it.
 - **`vk dev` acts on its own workspace.** `vk dev stop NAME`, `vk dev gc NAME` and
   `vk dev prune NAME` take this workspace's environments only and refuse a VM of
-  another; `vk stop`, `vk rm` and `vk reset` reach any VM. `vk dev gc --all-stale` is
+  another; `vk stop`, `vk delete` and `vk reset` reach any VM. `vk dev gc --all-stale` is
   still host-wide.
 - **Compose services appear in `vk list` once they have booted**; a declared service
   that never started is not listed.
