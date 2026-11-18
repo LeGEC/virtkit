@@ -25,7 +25,9 @@ untouched tree too (see papercuts.md).
    `tests::run_takes_name_and_the_last…`. Status: done.
 5. **Unified `vk list`** — `vk-driver/src/vmlist.rs` (`rows`, `Filter`, `render`) fed by
    `vms::list_report(ListOpts)`; JSON and `--field` on rows; full record kept.
-   Tests: `vmlist::tests`, `vms::tests::field_*`. Status: done.
+   A compose service gets a row only once it has a VM (running, or `svc-<name>/console.log`).
+   Tests: `vmlist::tests` (`a_service_without_a_vm_gets_no_row`), `vms::tests::field_*`.
+   Status: done.
 6. **Lifecycle verbs** — `vk-driver/src/lifecycle.rs`: pure `plan` per verb, kind and state;
    `vk start | restart | rm | reset | rename`; `vk stop NAME` through it.
    Tests: `lifecycle::tests`. Status: done.
@@ -36,6 +38,17 @@ untouched tree too (see papercuts.md).
    `make_display_safe`); `vk workloads` fills it; vk-hub `dev_name` prefers it.
    Tests: `vk-hub-proto tests::a_workload_name_is_kept…`,
    `vk-hub ui::dev::tests::an_environment_is_named_as_vk_names_it`. Status: done.
+8b. **Compose up stays unnamed** — `boots_no_primary`; `prepare_run_name` skips compose up
+   and refuses `--name` on it. Test: `tests::compose_up_is_never_named`. Status: done.
+8c. **`vk dev` verbs, cached start, workspace scope** — `dev/targets.rs` (`pick`, `scope`);
+   `vk dev up|start|stop(down)|restart [NAME…] [--service S] [--name N]`; `Overrides.no_build`
+   → `--require-cached`; `fleetctl::Request::Start { cached }` and `Manager::built`;
+   `vk start --build`; `gc NAME`/`prune NAME` scoped; vk-hub on `vk stop` / `vk rm --yes`.
+   Tests: `dev::targets::tests`, `dev::cli::tests::{lifecycle_verbs_take_names…,
+   a_named_stop_stays_in_its_workspace, bare_gc_removes…_a_named_gc_stays_in_it,
+   every_action_says_whether_it_boots…}`, `fleetctl::tests::a_start_is_cached_only…`,
+   vk-hub `dev_environments_are_started_stopped_and_cleaned_up`. Status: done; not verified
+   against a booting VM.
 9. **Docs** — README VM section (table pinned by `vmlist::tests::readme_table_sample…`),
    overview rows, docs/dev.md, CHANGELOG, `tests/dev-e2e.sh` (`vk list --running`).
    Status: done.

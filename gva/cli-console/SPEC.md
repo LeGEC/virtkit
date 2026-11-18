@@ -92,8 +92,12 @@ No REF means the current directory, exact project match. `--service S` stays and
 
 ### `vk list` (S3)
 
-One row per VM: every running registered VM, every named VM that is stopped, and each compose
-service of either (state from the control socket when the primary runs, `stopped` otherwise).
+One row per VM: every running registered VM, every named VM that is stopped, and each
+compose service of either that has a VM. A service has a VM when its primary reports it in a
+state other than `stopped`, or when its `svc-<name>/console.log` exists (it booted at least
+once). The state comes from the control socket when the primary runs, `stopped` otherwise. A
+declared service that never booted (profiled out, or a `build:` service never started) gets
+no row; `vk start VM/SERVICE` still accepts it.
 
 - Columns: `NAME` (the REF), `KIND` (`dev`, `run`, `service`), `STATUS`, `PID`, `UPTIME`, `MEM`,
   `IMAGE`, `PROJECT`, `PUBLISHED`; `--wide` adds `EXEC ADDRESS` and the full project path;
@@ -111,17 +115,45 @@ service of either (state from the control socket when the primary runs, `stopped
 
 | Verb | dev | run | service |
 |---|---|---|---|
-| `start` | `vk dev --workspace W --environment E up` (child process) | replay `run.json` | start the primary if stopped, then control-socket `Start` (dev: `vk dev service up`) |
-| `stop` | `dev::stop` (as `vk dev stop`) | existing `stop_one` | control-socket `Stop` (dev: `vk dev service down`) |
+| `start` | `vk dev --workspace W --environment E start` (child process) | replay `run.json` with `--require-cached` | start the primary if stopped, then control-socket `Start { cached }` (dev: `vk dev start --service S`) |
+| `stop` | `dev::stop` (as `vk dev stop`) | existing `stop_one` | control-socket `Stop` (dev: `vk dev stop --service S`) |
 | `restart` | stop, then start | same | same |
 | `rm [-f]` | `dev::list::remove` (as `vk dev gc`) | delete a managed dir; for a user dir delete `run.json` and `.virtkit-last.json` only | delete `svc-<name>/` while stopped |
 | `reset` | `vk dev prune` options | refused | refused |
 
+`start` boots only what is built; `vk start --build` builds what is missing, as `up` does.
 `rm` refuses a running VM unless `-f`, which stops it first, and releases the name.
 `vk dev gc NAME` and `vk dev prune NAME` keep working and also accept names; they print a note
 pointing to `vk rm` / `vk reset`.
 
-### Vocabulary (S6)
+### `vk dev` verbs and workspace scope (S7)
+
+- `vk dev up | start | stop | restart` pair as up/down and start/stop. `down` is a visible
+  alias of `stop`: in vk a stopped service loses its root disk at its next start anyway, so
+  there is no container-like state for `down` to remove that `stop` keeps.
+- `up` builds what is needed, then boots. `start` never builds: the boot runs with
+  `--require-cached` (restore from the cache, exit 3 on a miss) and freshness `reuse`, so a
+  running environment is left as it is; an environment with no `dev.json` (no finished
+  boot) fails, `up` creates it. `restart` is `stop` then `start`.
+- A compose service's start is the control protocol's `Start { unit, cached }`. `cached` is
+  optional on the wire (left out when false, default false), so older peers keep working.
+  The manager refuses a cached start of a `build:` unit whose build-tier image is absent.
+- The verbs take NAMEs (`dev/targets.rs`, pure `pick`): a compose service of the current
+  environment (its primary's service name is the environment), an environment of this
+  workspace (its VM name or state-dir name), or `ENV/SERVICE`. A name that is both a
+  service and an environment is refused until `--service NAME` or `--name NAME` (both
+  repeatable) says which.
+- `vk dev` acts on its workspace only. A name that is a VM of another workspace is refused
+  (exit 2); on a terminal the error names the global command (`vk stop NAME`, `vk start
+  NAME`, `vk start --build NAME`, `vk restart NAME`, `vk rm NAME`, `vk reset NAME`).
+  `vk dev gc NAME` and `vk dev prune NAME` follow the same rule; `gc --all-stale` stays
+  host-wide.
+- With NAMEs the command boots nothing in its own process: an environment that has to come
+  up does so in a child `vk dev --environment E up|start`, so one command can bring up
+  several.
+- `vk dev service up|down|reboot|status` stays.
+
+
 
 - `vk publish --service` is the option's name; `--via` stays as an alias.
 - `vk ping [REF]` is the agent probe; `vk status` stays as an alias.
@@ -132,8 +164,8 @@ pointing to `vk rm` / `vk reset`.
 
 - `Workload` gains an optional `name`. vk fills it; the hub keys dev rows by `name`, falling
   back to the state-dir basename.
-- `vk dev list --json` `name` is the environment name; the hub passes it to `vk dev stop/gc`,
-  which accept it.
+- `vk dev list --json` `name` is the environment name; the hub passes it to `vk stop` and
+  `vk rm --yes`, which accept it from anywhere (`vk dev stop/gc` are scoped to a workspace).
 
 ## Rejected alternatives
 
@@ -144,6 +176,12 @@ pointing to `vk rm` / `vk reset`.
 - **Name in `.virtkit/config.toml`**: committed, so every worktree would claim the same name.
 - **`vk dev list` as an alias of `vk list --kind dev`**: it reports disk sizes and staleness
   that per-VM rows do not carry; it stays the environment storage view.
+- **A `down` that removes more than `stop`** (images, storage): nothing `stop` keeps is
+  worth removing by default, and `vk dev prune` / `vk reset` already remove images and
+  storage on request.
+- **`start` booting exactly the image that last ran**, as `docker start` does: images live
+  in a shared, garbage-collected cache, so that image may be gone; `start` boots what the
+  current config resolves to, from the cache.
 
 ## Acceptance criteria
 
@@ -154,16 +192,28 @@ pointing to `vk rm` / `vk reset`.
 4. Dev dirs get names lazily, oldest first, ephemeral dirs skipped; basenames still resolve.
 5. `vk run --name` / `--detach` / `--state-dir` naming and `run.json` contents (unit tests on
    the preparation function).
-6. `vk list` rows: grouping, order, services, stopped VMs, filters (unit tests on the pure
-   row builder).
+6. `vk list` rows: grouping, order, services, stopped VMs, filters, services without a VM
+   left out (unit tests on the pure row builder).
 7. start/stop/rm planning per kind (unit tests on the pure planner); `rm` never deletes an
    unmanaged dir.
 8. `vk ping`, `vk status` alias, `publish --service`, `vk paths` lines (CLI parse tests).
 9. vk-hub keys a dev environment by `Workload.name`, falling back to its state dir's own
    name, and the proto drops a `name` that is not one (unit tests in both crates).
-10. `cargo build`, `cargo clippy`, `cargo test` for vk-driver, vk-hub, vk-hub-proto pass.
+10. `vk dev` names: services, environments, `ENV/SERVICE`, the primary's service name,
+    ambiguity, `--service`/`--name`, outside the workspace, unknown (unit tests on `pick`);
+    a named stop or gc of another workspace's VM is refused (CLI tests); `down` parses as
+    `stop`; only a bare `up`/`start` boots in-process (`boots()` table).
+11. `Start.cached` is left out when false and defaults to false (vk-core test).
+12. vk-hub runs `vk stop` and `vk rm --yes` for dev environments (vk-hub tests).
+13. `cargo build`, `cargo clippy`, `cargo test` for vk-driver, vk-hub, vk-hub-proto pass.
 
 ## Open questions
+
+- Should a run keep supervising its services (and its control socket) after its primary
+  stops, so the primary can be rebuilt or replaced without restarting them? That makes the
+  primary a unit the manager starts like the services, and registers compose up (a
+  supervisor with no primary) too. Not done: `vk reboot` already restarts a primary in
+  place with its services up.
 
 - Should unnamed foreground runs be registered under an automatic name later?
 - A dev environment stopped before this change lists no compose services until its next

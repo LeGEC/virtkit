@@ -15,3 +15,25 @@
   serves `vk rm` of a name whose dir is gone. Two full runs: only the 12 baseline failures.
 - Smoke test with the debug binary and XDG dirs under /tmp: all verbs behave on fake state;
   `vk run`/`vk start` reach the boot and stop at the missing `/dev/kvm`.
+
+## 2026-11-18 (later)
+
+- Found that compose up (`--compose` with no primary) got a name and `run.json` when
+  detached but never registers: listed stopped while running, and `vk start` would boot a
+  second fleet. It is now never named.
+- vmlist agent (another session, same worktree): on a real host `vk list` showed a row for
+  every declared service, including services never built. Rows now require a VM, with
+  `console.log` as the marker, because `svc-<name>/` is created for every declared service.
+  Coordination moved to `agent-hub.md` (flock for short reads/appends).
+- Decided with the user: `down` = `stop`; no option to also remove images or storage; verbs
+  take service names; `--service`/`--name` disambiguate; `vk dev` refuses VMs of other
+  workspaces and names the global command on a terminal; the run-as-supervisor idea is an
+  open question.
+- `start` without building: `units::BuildOpts` carries no `require_cached`, and threading
+  one through ten construction sites was not worth it; the manager checks the unit's
+  build-tier image path instead (`build_unit_ext4`, a pure function of the stage key).
+- `boots()` decides the detach fork before dispatch, so a `vk dev up NAME…` that booted
+  in-process would boot the current environment even for another's name. With NAMEs the
+  command boots nothing itself and runs a child `vk dev --environment E up|start`.
+- Removed tests that pinned the host-wide `vk dev stop NAME` / `gc NAME`; replaced by
+  scope tests.
