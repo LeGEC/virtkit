@@ -1,9 +1,11 @@
 //! `vk list`: one row per VM `vk` knows — every running VM, every named VM that is stopped,
-//! and each compose service of either — grouped by project, a primary before its services.
+//! and each compose service of either that has a VM — grouped by project, a primary before
+//! its services.
 //!
-//! [`rows`] is pure: it turns what the caller read (the registry's live entries with what was
-//! measured of them, and the named VMs that are not running) into rows, so a test states the
-//! facts outright. [`render`] lays the rows out as the table.
+//! [`rows_with`] is pure: it turns what the caller read (the registry's live entries with what
+//! was measured of them, and the named VMs that are not running) into rows, so a test states
+//! the facts outright. [`rows`] gives it the one fact it reads from disk, whether a service's
+//! VM ever booted. [`render`] lays the rows out as the table.
 
 use std::path::{Path, PathBuf};
 
@@ -102,6 +104,26 @@ pub struct Known {
 /// Every row, grouped by project (groups by path, no project last), dev environments before
 /// runs within a group, each primary followed by its services by name.
 pub fn rows(live: &[Live], known: &[Known], now: u64) -> Vec<Row> {
+    rows_with(live, known, now, booted)
+}
+
+/// Whether the service VM whose directory is `svc_dir` ever booted: every boot writes its
+/// console log there (`units::boot_unit`). The directory itself proves nothing, as a run
+/// makes one for every declared service before any boots.
+fn booted(svc_dir: &Path) -> bool {
+    svc_dir.join(crate::run::CONSOLE_LOG).exists()
+}
+
+/// [`rows`], told by `booted` which service directories hold a VM that booted. A compose
+/// service gets a row only when it has a VM: one its primary reports in any state but
+/// stopped, or one that booted before. A declared service that never booted (profiled out,
+/// or a `build:` service never started) gets none; `vk start VM/SERVICE` still takes it.
+pub fn rows_with(
+    live: &[Live],
+    known: &[Known],
+    now: u64,
+    booted: impl Fn(&Path) -> bool,
+) -> Vec<Row> {
     let mut out: Vec<Row> = Vec::new();
     for l in live {
         let e = l.entry;
@@ -132,6 +154,11 @@ pub fn rows(live: &[Live], known: &[Known], now: u64) -> Vec<Row> {
                 .units
                 .as_ref()
                 .and_then(|u| u.iter().find(|u| u.name == s.name));
+            let dir = service_dir(&s.exec_addr)
+                .unwrap_or_else(|| e.state_dir.join(format!("svc-{}", s.name)));
+            if !unit.is_some_and(|u| u.state != STOPPED) && !booted(&dir) {
+                continue;
+            }
             out.push(Row {
                 name: format!("{name}/{}", s.name),
                 kind: Kind::Service,
@@ -144,7 +171,7 @@ pub fn rows(live: &[Live], known: &[Known], now: u64) -> Vec<Row> {
                 image: None,
                 project: e.project_dir.clone(),
                 environment: l.environment.clone(),
-                state_dir: service_dir(&s.exec_addr).unwrap_or_else(|| e.state_dir.clone()),
+                state_dir: dir,
                 exec_addr: Some(s.exec_addr.clone()),
                 ssh_addr: None,
                 ip: unit.map(|u| crate::vms::bare_ip(&u.ip).to_string()),
@@ -183,6 +210,10 @@ pub fn rows(live: &[Live], known: &[Known], now: u64) -> Vec<Row> {
         });
         let project = out.last().and_then(|r| r.project.clone());
         for s in last.map(|e| e.services.as_slice()).unwrap_or_default() {
+            let dir = k.dir.join(format!("svc-{}", s.name));
+            if !booted(&dir) {
+                continue;
+            }
             out.push(Row {
                 name: format!("{}/{}", k.name, s.name),
                 kind: Kind::Service,
@@ -195,7 +226,7 @@ pub fn rows(live: &[Live], known: &[Known], now: u64) -> Vec<Row> {
                 image: None,
                 project: project.clone(),
                 environment: k.environment.clone(),
-                state_dir: k.dir.join(format!("svc-{}", s.name)),
+                state_dir: dir,
                 exec_addr: None,
                 ssh_addr: None,
                 ip: None,
@@ -356,6 +387,11 @@ mod tests {
         }
     }
 
+    /// Rows as if every declared service had booted once.
+    fn rows(live: &[Live], known: &[Known], now: u64) -> Vec<Row> {
+        rows_with(live, known, now, |_| true)
+    }
+
     fn names(rows: &[Row]) -> Vec<&str> {
         rows.iter().map(|r| r.name.as_str()).collect()
     }
@@ -405,6 +441,52 @@ mod tests {
         assert_eq!(by("zeta").image.as_deref(), Some("img-13"));
         assert_eq!(by("zeta/cache").status, STOPPED);
         assert_eq!(by("zeta/cache").parent.as_deref(), Some("zeta"));
+    }
+
+    /// A declared service gets a row only with a VM: reported in a state but stopped, or
+    /// booted before (its console log); a stopped primary's services only when booted.
+    #[test]
+    fn a_service_without_a_vm_gets_no_row() {
+        let app = entry("/s/app", "/w/app", 10, &["db", "lazy", "off", "old", "web"]);
+        let zeta = Known {
+            name: "zeta".into(),
+            dir: "/s/zeta".into(),
+            kind: Kind::Run,
+            last: Some(entry("/s/zeta", "/w/app", 13, &["cache", "never"])),
+            project: None,
+            environment: None,
+        };
+        let once = [Path::new("/s/app/svc-old"), Path::new("/s/zeta/svc-cache")];
+        let rows = rows_with(
+            &[live(
+                &app,
+                "app",
+                Kind::Run,
+                vec![
+                    unit("db", "running"),
+                    unit("off", STOPPED),
+                    unit("old", STOPPED),
+                    unit("web", "starting"),
+                ],
+            )],
+            &[zeta],
+            0,
+            |d| once.contains(&d),
+        );
+        assert_eq!(
+            names(&rows),
+            ["app", "app/db", "app/old", "app/web", "zeta", "zeta/cache"]
+        );
+    }
+
+    #[test]
+    fn booted_reads_the_console_log() {
+        let dir = std::env::temp_dir().join(format!("vk-vmlist-booted-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(!booted(&dir));
+        std::fs::write(dir.join(crate::run::CONSOLE_LOG), "").unwrap();
+        assert!(booted(&dir));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
