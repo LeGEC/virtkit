@@ -606,27 +606,6 @@ fn published(entry: &VmEntry) -> Vec<Published> {
     }
 }
 
-/// The PUBLISHED column: each publisher as `listen->to`, `@service` appended when a compose
-/// sibling dials, comma-separated; `-` when nothing is published. `tcp://` is dropped from
-/// both ends since it is the common case; any other scheme stays spelled out. A publisher
-/// whose lock could not be tested is marked `(unconfirmed)`, as `vk publish list` marks it.
-fn published_cell(published: &[Published]) -> String {
-    if published.is_empty() {
-        return "-".to_string();
-    }
-    published
-        .iter()
-        .map(|(e, liveness)| {
-            let mut cell = published_addr(e);
-            if liveness.unconfirmed() {
-                cell.push_str(" (unconfirmed)");
-            }
-            cell
-        })
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
 /// One publisher as `listen->to`, with `@service` when a compose sibling rather than the
 /// primary dials the target.
 pub(crate) fn published_addr(e: &crate::publish::Entry) -> String {
@@ -1349,8 +1328,7 @@ impl Ref {
         Ok(match text.split_once('/') {
             Some((vm, service)) => Ref::Name {
                 vm: vm.to_string(),
-                service: Some(service.trim_end_matches('/').to_string())
-                    .filter(|s| !s.is_empty()),
+                service: Some(service.trim_end_matches('/').to_string()).filter(|s| !s.is_empty()),
             },
             None => Ref::Name {
                 vm: text.to_string(),
@@ -2130,7 +2108,10 @@ pub(crate) mod tests {
     fn a_ref_reads_digits_as_a_pid_paths_as_paths_and_words_as_names() {
         assert_eq!(parse("2144802"), Ref::Pid(2144802));
         assert_eq!(parse("007"), Ref::Pid(7));
-        assert_eq!(parse("/home/vince/repo"), Ref::Path("/home/vince/repo".into()));
+        assert_eq!(
+            parse("/home/vince/repo"),
+            Ref::Path("/home/vince/repo".into())
+        );
         assert_eq!(parse("./123"), Ref::Path("./123".into()));
         assert_eq!(parse("../x"), Ref::Path("../x".into()));
         assert_eq!(parse("."), Ref::Path(".".into()));
@@ -2200,10 +2181,7 @@ pub(crate) mod tests {
             dir("/home/other", false).not_found(),
             "no running vk VM for /home/other\n"
         );
-        assert_eq!(
-            named("/s").not_found(),
-            "x is not running (`vk start x`)\n"
-        );
+        assert_eq!(named("/s").not_found(), "x is not running (`vk start x`)\n");
     }
 
     #[test]
@@ -2722,25 +2700,6 @@ PUBLISHED     -
             pid: 4242,
             created_secs: 0,
         }
-    }
-
-    #[test]
-    fn published_cell_maps_listen_to_target_and_marks_the_dialing_service_and_unconfirmed() {
-        assert_eq!(published_cell(&[]), "-");
-        let published = [
-            (
-                publisher("web", "tcp://127.0.0.1:8443", "tcp://runner:443", None),
-                Liveness::Held,
-            ),
-            (
-                publisher("db", "/tmp/pg.sock", "tcp://127.0.0.1:5432", Some("db")),
-                Liveness::Unknown,
-            ),
-        ];
-        assert_eq!(
-            published_cell(&published),
-            "127.0.0.1:8443->runner:443, /tmp/pg.sock->127.0.0.1:5432@db (unconfirmed)"
-        );
     }
 
     // An entry written before `atop_log` and the boot-time fields existed still loads:

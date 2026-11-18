@@ -547,11 +547,7 @@ fn running_vms() -> Vec<Running> {
 /// the state base scanned against what is running. Measuring what each holds on disk is a stat
 /// walk of every file in it, done by default; `--no-sizes` (`sizes = false`) opts out.
 pub fn state(sizes: bool) -> Result<Vec<Row>> {
-    let mut rows = scan(
-        &crate::dev::plan::dev_state_base()?,
-        &running_vms(),
-        sizes,
-    );
+    let mut rows = scan(&crate::dev::plan::dev_state_base()?, &running_vms(), sizes);
     apply_names(&mut rows);
     Ok(rows)
 }

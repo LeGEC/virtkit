@@ -168,10 +168,7 @@ fn name(found: &mut [(Workload, Option<i32>)]) {
     let all = idx.all();
     for (w, _) in found.iter_mut() {
         let dir = Path::new(&w.state_dir);
-        w.name = all
-            .iter()
-            .find(|(_, d)| d == dir)
-            .map(|(n, _)| n.clone());
+        w.name = all.iter().find(|(_, d)| d == dir).map(|(n, _)| n.clone());
     }
 }
 

@@ -436,7 +436,10 @@ mod tests {
         let base = "a".repeat(MAX_LEN);
         idx.claim(&t.0.join("1"), &base).unwrap();
         let second = idx.claim(&t.0.join("2"), &base).unwrap();
-        assert!(second.ends_with("-2") && second.len() <= MAX_LEN, "{second}");
+        assert!(
+            second.ends_with("-2") && second.len() <= MAX_LEN,
+            "{second}"
+        );
         validate(&second).unwrap();
     }
 

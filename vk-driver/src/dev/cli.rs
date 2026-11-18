@@ -686,7 +686,10 @@ async fn dev_action(
         && (*all_stale || !names.is_empty())
     {
         if !names.is_empty() {
-            eprintln!("vk: note: `vk rm {}` removes a VM, whatever made it", names.join(" "));
+            eprintln!(
+                "vk: note: `vk rm {}` removes a VM, whatever made it",
+                names.join(" ")
+            );
         }
         return dev_gc(*yes, *all_stale, names, false);
     }

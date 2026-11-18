@@ -128,7 +128,10 @@ pub fn rows(live: &[Live], known: &[Known], now: u64) -> Vec<Row> {
             stale: l.fresh.map(Freshness::json),
         });
         for s in &e.services {
-            let unit = l.units.as_ref().and_then(|u| u.iter().find(|u| u.name == s.name));
+            let unit = l
+                .units
+                .as_ref()
+                .and_then(|u| u.iter().find(|u| u.name == s.name));
             out.push(Row {
                 name: format!("{name}/{}", s.name),
                 kind: Kind::Service,
@@ -206,7 +209,7 @@ pub fn rows(live: &[Live], known: &[Known], now: u64) -> Vec<Row> {
         .filter(|r| r.parent.is_none())
         .map(|r| (r.name.clone(), r.kind))
         .collect();
-    out.sort_by(|a, b| sort_key(a, &kind_of).cmp(&sort_key(b, &kind_of)));
+    out.sort_by_key(|r| sort_key(r, &kind_of));
     out
 }
 
@@ -381,7 +384,15 @@ mod tests {
         );
         assert_eq!(
             names(&rows),
-            ["app", "app/db", "app/web", "tool", "zeta", "zeta/cache", "other"]
+            [
+                "app",
+                "app/db",
+                "app/web",
+                "tool",
+                "zeta",
+                "zeta/cache",
+                "other"
+            ]
         );
         let by = |n: &str| rows.iter().find(|r| r.name == n).unwrap();
         assert_eq!(by("app").uptime_secs, Some(60));
@@ -409,7 +420,12 @@ mod tests {
     fn filters_keep_by_status_kind_and_name() {
         let app = entry("/s/app", "/w/app", 10, &["db", "web"]);
         let rows = rows(
-            &[live(&app, "app", Kind::Run, vec![unit("db", "stopped"), unit("web", "running")])],
+            &[live(
+                &app,
+                "app",
+                Kind::Run,
+                vec![unit("db", "stopped"), unit("web", "running")],
+            )],
             &[],
             0,
         );
@@ -451,15 +467,30 @@ mod tests {
 
     /// The README's sample table, as the formatter lays it out.
     fn readme_rows() -> String {
-        let mut shop = entry("/home/me/.local/state/virtkit/dev/shop-1a2b", "/home/me/shop", 41877, &["db", "redis"]);
+        let mut shop = entry(
+            "/home/me/.local/state/virtkit/dev/shop-1a2b",
+            "/home/me/shop",
+            41877,
+            &["db", "redis"],
+        );
         shop.label = "devcontainer".into();
         shop.mem = Some("16G".into());
         shop.created_secs = 100_000 - 35 * 60;
-        let mut app = entry("/home/me/.local/state/virtkit/run/app-9f3c", "/home/me/app", 41230, &[]);
+        let mut app = entry(
+            "/home/me/.local/state/virtkit/run/app-9f3c",
+            "/home/me/app",
+            41230,
+            &[],
+        );
         app.label = "app/Dockerfile:dev".into();
         app.mem = Some("8G".into());
         app.created_secs = 100_000 - (2 * 3600 + 14 * 60);
-        let mut scratch = entry("/home/me/.local/state/virtkit/run/scratch-77aa", "/home/me/tmp", 1, &[]);
+        let mut scratch = entry(
+            "/home/me/.local/state/virtkit/run/scratch-77aa",
+            "/home/me/tmp",
+            1,
+            &[],
+        );
         scratch.label = "alpine".into();
         let pg = (
             crate::publish::Entry {
@@ -472,7 +503,12 @@ mod tests {
             },
             crate::publish::Liveness::Held,
         );
-        let mut shop_live = live(&shop, "shop", Kind::Dev, vec![unit("db", "running"), unit("redis", "stopped")]);
+        let mut shop_live = live(
+            &shop,
+            "shop",
+            Kind::Dev,
+            vec![unit("db", "running"), unit("redis", "stopped")],
+        );
         shop_live.mem_used = Some(6_335_076_761);
         shop_live.published = vec![pg];
         let mut app_live = live(&app, "app", Kind::Run, vec![]);
@@ -509,6 +545,12 @@ mod tests {
         assert!(lines[0].starts_with("NAME    KIND"), "{out}");
         assert!(lines[1].starts_with("app     dev"), "{out}");
         assert!(lines[2].starts_with("app/db  service  running  -"), "{out}");
-        assert!(render(&rows, None, true, true).lines().next().unwrap().contains("EXEC ADDRESS"));
+        assert!(
+            render(&rows, None, true, true)
+                .lines()
+                .next()
+                .unwrap()
+                .contains("EXEC ADDRESS")
+        );
     }
 }

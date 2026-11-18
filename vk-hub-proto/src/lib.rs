@@ -1561,8 +1561,9 @@ pub fn is_vm_name(name: &str) -> bool {
     !b.is_empty()
         && b.len() <= 40
         && (b[0].is_ascii_lowercase() || b[0].is_ascii_digit())
-        && b.iter()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b'.' | b'_' | b'-'))
+        && b.iter().all(|c| {
+            c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b'.' | b'_' | b'-')
+        })
         && !b.iter().all(u8::is_ascii_digit)
 }
 

@@ -106,10 +106,10 @@ mod units;
 mod usage;
 mod vm;
 mod vmdk;
+mod vmlist;
 mod vmm;
 mod vmmctl;
 mod vmmthreads;
-mod vmlist;
 mod vms;
 mod winbuild;
 mod wincache;
@@ -3748,7 +3748,12 @@ async fn cli_main(cli: Cli) -> ExitCode {
             yes,
             timeout,
         } => {
-            return lifecycle::run(lifecycle::Verb::Rm { force: *force }, targets, *timeout, *yes);
+            return lifecycle::run(
+                lifecycle::Verb::Rm { force: *force },
+                targets,
+                *timeout,
+                *yes,
+            );
         }
         Cmd::Reset { target, options } => {
             return match crate::dev::prune::run_by_name(target, options) {
@@ -3771,7 +3776,12 @@ async fn cli_main(cli: Cli) -> ExitCode {
         } if matches!(vms::Ref::parse(target), Ok(vms::Ref::Name { .. }))
             && !Path::new(target).is_dir() =>
         {
-            return lifecycle::run(lifecycle::Verb::Stop, &[target.clone()], *timeout, false);
+            return lifecycle::run(
+                lifecycle::Verb::Stop,
+                std::slice::from_ref(target),
+                *timeout,
+                false,
+            );
         }
         _ => {}
     }
@@ -5345,18 +5355,18 @@ async fn cli_main(cli: Cli) -> ExitCode {
             },
         },
         // Replace vk so the SSH session's exit status reaches the caller.
-        Cmd::Ssh { state_dir, args } => match state_dir_of(&state_dir)
-            .and_then(|dir| sshclient::exec_ssh(&dir, &args))
-        {
-            Ok(never) => match never {},
-            Err(e) => fail(&e, 1),
-        },
-        Cmd::SshConfig { state_dir } => match state_dir_of(&state_dir)
-            .and_then(|dir| sshclient::print_config(&dir))
-        {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(e) => fail(&e, 1),
-        },
+        Cmd::Ssh { state_dir, args } => {
+            match state_dir_of(&state_dir).and_then(|dir| sshclient::exec_ssh(&dir, &args)) {
+                Ok(never) => match never {},
+                Err(e) => fail(&e, 1),
+            }
+        }
+        Cmd::SshConfig { state_dir } => {
+            match state_dir_of(&state_dir).and_then(|dir| sshclient::print_config(&dir)) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => fail(&e, 1),
+            }
+        }
         // stdio↔socket splice for an SSH ProxyCommand; returns when either side closes.
         Cmd::Connect { addr } => match vk_core::forward::run_connect(&addr).await {
             Ok(()) => ExitCode::SUCCESS,
@@ -6174,9 +6184,7 @@ fn console_log_path(target: Option<&Path>, service: Option<&str>) -> anyhow::Res
                     None => return Err(e),
                 },
                 (_, Some(t)) => t.to_path_buf(),
-                (_, None) => {
-                    std::env::current_dir().context("resolving the current directory")?
-                }
+                (_, None) => std::env::current_dir().context("resolving the current directory")?,
             };
             let dir = match service {
                 Some(name) => dir.join(format!("svc-{name}")),
@@ -7159,7 +7167,13 @@ mod tests {
         let report = paths_report(&config::Config::default(), false).unwrap();
         assert!(report.contains("\ndata dir        "), "{report}");
         assert!(!report.contains("\nstate dir "), "{report}");
-        for line in ["runs ledger     ", "VM state        ", "  dev/  ", "  run/  ", "  names/  "] {
+        for line in [
+            "runs ledger     ",
+            "VM state        ",
+            "  dev/  ",
+            "  run/  ",
+            "  names/  ",
+        ] {
             assert!(report.contains(line), "{line}: {report}");
         }
     }
@@ -7171,7 +7185,13 @@ mod tests {
             assert!(matches!(cli.cmd, Cmd::Status { .. }), "{name}");
         }
         let cli = Cli::try_parse_from([
-            "vk", "publish", "--service", "db", "--listen", "tcp://127.0.0.1:1", "--to",
+            "vk",
+            "publish",
+            "--service",
+            "db",
+            "--listen",
+            "tcp://127.0.0.1:1",
+            "--to",
             "tcp://x:2",
         ])
         .unwrap();
@@ -8200,8 +8220,14 @@ mod tests {
             auto_name_base(Some("ghcr.io/org/tool@sha256:ab"), None, None),
             "tool"
         );
-        assert_eq!(auto_name_base(Some("./bundles/win11/"), None, None), "win11");
-        assert_eq!(auto_name_base(Some("x"), Some("devcontainer"), None), "devcontainer");
+        assert_eq!(
+            auto_name_base(Some("./bundles/win11/"), None, None),
+            "win11"
+        );
+        assert_eq!(
+            auto_name_base(Some("x"), Some("devcontainer"), None),
+            "devcontainer"
+        );
         assert_eq!(auto_name_base(None, None, Some("dev")), "dev");
         assert_eq!(auto_name_base(None, None, None), "vm");
     }
@@ -8209,8 +8235,19 @@ mod tests {
     #[test]
     fn run_takes_name_and_the_last_of_a_repeated_option() {
         let cli = Cli::try_parse_from([
-            "vk", "run", "--state-dir", "/a", "--name", "x", "alpine", "--state-dir", "/b",
-            "--detach", "--detach", "--", "true",
+            "vk",
+            "run",
+            "--state-dir",
+            "/a",
+            "--name",
+            "x",
+            "alpine",
+            "--state-dir",
+            "/b",
+            "--detach",
+            "--detach",
+            "--",
+            "true",
         ])
         .unwrap();
         let Cmd::Run {

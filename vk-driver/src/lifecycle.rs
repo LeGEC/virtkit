@@ -112,7 +112,13 @@ pub enum Verb {
 
 /// What `verb` does to `t`, given whether its primary and (for a service) the service run,
 /// and whether its state dir is one `vk` manages.
-pub fn plan(verb: Verb, t: &Target, primary_up: bool, service_up: bool, managed: bool) -> Result<Vec<Step>> {
+pub fn plan(
+    verb: Verb,
+    t: &Target,
+    primary_up: bool,
+    service_up: bool,
+    managed: bool,
+) -> Result<Vec<Step>> {
     use Step::*;
     let dev = t.kind == Kind::Dev;
     Ok(match (verb, &t.service) {
@@ -123,7 +129,11 @@ pub fn plan(verb: Verb, t: &Target, primary_up: bool, service_up: bool, managed:
             if !primary_up {
                 steps.push(if dev { DevUp } else { Replay });
             }
-            steps.push(if dev { DevService { up: true } } else { Control { up: true } });
+            steps.push(if dev {
+                DevService { up: true }
+            } else {
+                Control { up: true }
+            });
             steps
         }
         (Verb::Stop, None) if !primary_up && !dev => {
@@ -134,7 +144,11 @@ pub fn plan(verb: Verb, t: &Target, primary_up: bool, service_up: bool, managed:
         (Verb::Stop, Some(_)) if !primary_up || !service_up => {
             vec![Nothing(format!("{} is not running", t.shown()))]
         }
-        (Verb::Stop, Some(_)) => vec![if dev { DevService { up: false } } else { Control { up: false } }],
+        (Verb::Stop, Some(_)) => vec![if dev {
+            DevService { up: false }
+        } else {
+            Control { up: false }
+        }],
         (Verb::Rm { force }, service) => {
             let up = match service {
                 None => primary_up,
@@ -189,7 +203,10 @@ fn dev_identity(dir: &Path) -> Result<(String, String)> {
     if !Path::new(&workspace).is_dir() {
         bail!("its workspace {workspace} is gone");
     }
-    Ok((workspace, text("environment").unwrap_or_else(|| "dev".into())))
+    Ok((
+        workspace,
+        text("environment").unwrap_or_else(|| "dev".into()),
+    ))
 }
 
 /// Run this `vk` with `args`, in `cwd`, its output ours; fail unless it succeeds.
@@ -217,8 +234,8 @@ fn execute(t: &Target, steps: &[Step], timeout: u64, yes: bool) -> Result<String
         match step {
             Step::Nothing(what) => out.push_str(&format!("{what}\n")),
             Step::DevUp => {
-                let (ws, env) = dev_identity(&t.dir)
-                    .with_context(|| format!("cannot start {}", t.name))?;
+                let (ws, env) =
+                    dev_identity(&t.dir).with_context(|| format!("cannot start {}", t.name))?;
                 let args = ["dev", "--workspace", &ws, "--environment", &env, "up"];
                 vk(&args.map(String::from), None, false)?;
             }
@@ -227,7 +244,14 @@ fn execute(t: &Target, steps: &[Step], timeout: u64, yes: bool) -> Result<String
                 let service = t.service.clone().unwrap_or_default();
                 let op = if *up { "up" } else { "down" };
                 let args = [
-                    "dev", "--workspace", &ws, "--environment", &env, "service", op, &service,
+                    "dev",
+                    "--workspace",
+                    &ws,
+                    "--environment",
+                    &env,
+                    "service",
+                    op,
+                    &service,
                 ];
                 vk(&args.map(String::from), None, false)?;
             }
@@ -246,8 +270,8 @@ fn execute(t: &Target, steps: &[Step], timeout: u64, yes: bool) -> Result<String
                 )?;
             }
             Step::Control { up } => {
-                let entry = running_on(&t.dir)
-                    .with_context(|| format!("{} is not running", t.name))?;
+                let entry =
+                    running_on(&t.dir).with_context(|| format!("{} is not running", t.name))?;
                 let ctl = vms::control_socket(&entry)
                     .with_context(|| format!("{} runs no compose services", t.name))?;
                 let unit = t.service.clone().unwrap_or_default();
@@ -293,9 +317,16 @@ fn execute(t: &Target, steps: &[Step], timeout: u64, yes: bool) -> Result<String
                 }
             }
             Step::RemoveDir => {
+                let idx = crate::names::Index::open()?;
+                if !t.dir.exists() {
+                    // A name left on a directory something else removed: only the name goes.
+                    idx.remove(&t.name);
+                    out.push_str(&format!("forgot {} (its state dir was gone)\n", t.name));
+                    continue;
+                }
                 std::fs::remove_dir_all(&t.dir)
                     .with_context(|| format!("removing {}", t.dir.display()))?;
-                crate::names::Index::open()?.release(&t.dir);
+                idx.release(&t.dir);
                 out.push_str(&format!("removed {}\n", t.name));
             }
             Step::Forget => {
@@ -336,8 +367,12 @@ fn service_up(entry: Option<&VmEntry>, name: Option<&str>) -> bool {
         return false;
     };
     let req = vk_core::fleetctl::Request::Status { unit: name.into() };
-    vms::control(&ctl, &req, Some(std::time::Duration::from_secs(5)), |_| {})
-        .is_ok_and(|r| r.ok && r.units.iter().any(|u| u.name == name && u.state != "stopped"))
+    vms::control(&ctl, &req, Some(std::time::Duration::from_secs(5)), |_| {}).is_ok_and(|r| {
+        r.ok && r
+            .units
+            .iter()
+            .any(|u| u.name == name && u.state != "stopped")
+    })
 }
 
 /// `vk start|stop|rm` on each REF in turn; the exit status says whether every one did.
@@ -358,7 +393,11 @@ pub fn run(verb: Verb, refs: &[std::ffi::OsString], timeout: u64, yes: bool) -> 
             }
         }
     }
-    if ok { ExitCode::SUCCESS } else { ExitCode::from(1) }
+    if ok {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    }
 }
 
 /// `vk restart REF`: stop, then start.
@@ -397,16 +436,32 @@ mod tests {
         }
     }
 
-    fn steps(verb: Verb, kind: Kind, service: Option<&str>, up: bool, svc_up: bool, managed: bool) -> Vec<Step> {
+    fn steps(
+        verb: Verb,
+        kind: Kind,
+        service: Option<&str>,
+        up: bool,
+        svc_up: bool,
+        managed: bool,
+    ) -> Vec<Step> {
         plan(verb, &target(kind, service), up, svc_up, managed).unwrap()
     }
 
     #[test]
     fn start_boots_by_kind_and_a_service_after_its_primary() {
         use Step::*;
-        assert_eq!(steps(Verb::Start, Kind::Dev, None, false, false, true), [DevUp]);
-        assert_eq!(steps(Verb::Start, Kind::Run, None, false, false, true), [Replay]);
-        assert!(matches!(steps(Verb::Start, Kind::Run, None, true, false, true)[..], [Nothing(_)]));
+        assert_eq!(
+            steps(Verb::Start, Kind::Dev, None, false, false, true),
+            [DevUp]
+        );
+        assert_eq!(
+            steps(Verb::Start, Kind::Run, None, false, false, true),
+            [Replay]
+        );
+        assert!(matches!(
+            steps(Verb::Start, Kind::Run, None, true, false, true)[..],
+            [Nothing(_)]
+        ));
         assert_eq!(
             steps(Verb::Start, Kind::Dev, Some("db"), false, false, true),
             [DevUp, DevService { up: true }]
@@ -420,9 +475,18 @@ mod tests {
     #[test]
     fn stop_goes_through_dev_for_an_environment_and_skips_what_is_down() {
         use Step::*;
-        assert_eq!(steps(Verb::Stop, Kind::Dev, None, false, false, true), [DevStop]);
-        assert_eq!(steps(Verb::Stop, Kind::Run, None, true, false, true), [RunStop]);
-        assert!(matches!(steps(Verb::Stop, Kind::Run, None, false, false, true)[..], [Nothing(_)]));
+        assert_eq!(
+            steps(Verb::Stop, Kind::Dev, None, false, false, true),
+            [DevStop]
+        );
+        assert_eq!(
+            steps(Verb::Stop, Kind::Run, None, true, false, true),
+            [RunStop]
+        );
+        assert!(matches!(
+            steps(Verb::Stop, Kind::Run, None, false, false, true)[..],
+            [Nothing(_)]
+        ));
         assert_eq!(
             steps(Verb::Stop, Kind::Dev, Some("db"), true, true, true),
             [DevService { up: false }]
@@ -436,17 +500,62 @@ mod tests {
     #[test]
     fn rm_refuses_what_runs_unless_forced_and_never_deletes_a_users_dir() {
         use Step::*;
-        assert!(plan(Verb::Rm { force: false }, &target(Kind::Run, None), true, false, true).is_err());
+        assert!(
+            plan(
+                Verb::Rm { force: false },
+                &target(Kind::Run, None),
+                true,
+                false,
+                true
+            )
+            .is_err()
+        );
         assert_eq!(
             steps(Verb::Rm { force: true }, Kind::Run, None, true, false, true),
             [RunStop, RemoveDir]
         );
-        assert_eq!(steps(Verb::Rm { force: false }, Kind::Run, None, false, false, false), [Forget]);
-        assert_eq!(steps(Verb::Rm { force: false }, Kind::Dev, None, false, false, true), [DevRemove]);
         assert_eq!(
-            steps(Verb::Rm { force: false }, Kind::Run, Some("db"), true, false, true),
+            steps(
+                Verb::Rm { force: false },
+                Kind::Run,
+                None,
+                false,
+                false,
+                false
+            ),
+            [Forget]
+        );
+        assert_eq!(
+            steps(
+                Verb::Rm { force: false },
+                Kind::Dev,
+                None,
+                false,
+                false,
+                true
+            ),
+            [DevRemove]
+        );
+        assert_eq!(
+            steps(
+                Verb::Rm { force: false },
+                Kind::Run,
+                Some("db"),
+                true,
+                false,
+                true
+            ),
             [RemoveService]
         );
-        assert!(plan(Verb::Rm { force: false }, &target(Kind::Run, Some("db")), true, true, true).is_err());
+        assert!(
+            plan(
+                Verb::Rm { force: false },
+                &target(Kind::Run, Some("db")),
+                true,
+                true,
+                true
+            )
+            .is_err()
+        );
     }
 }
