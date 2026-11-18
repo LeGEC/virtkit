@@ -685,6 +685,9 @@ async fn dev_action(
     } = &action
         && (*all_stale || !names.is_empty())
     {
+        if !names.is_empty() {
+            eprintln!("vk: note: `vk rm {}` removes a VM, whatever made it", names.join(" "));
+        }
         return dev_gc(*yes, *all_stale, names, false);
     }
     // Like named stops, named prunes use host state and work from another or deleted
@@ -694,6 +697,7 @@ async fn dev_action(
         options,
     } = &action
     {
+        eprintln!("vk: note: `vk reset {name}` does the same");
         return match super::prune::run_by_name(name, options) {
             Ok(report) => write_report(&report),
             Err(e) => fail(&e, 1),
@@ -1194,7 +1198,7 @@ enum Ready {
 /// the config: no state under it is nothing to remove, as a bare `stop` of a stopped
 /// environment is not a failure. A run that only showed what would go did not do what it
 /// was asked, and exits 1.
-fn dev_gc(yes: bool, all_stale: bool, names: &[String], own: bool) -> ExitCode {
+pub(crate) fn dev_gc(yes: bool, all_stale: bool, names: &[String], own: bool) -> ExitCode {
     // Always measured: the preview's whole job is to show what is about to be destroyed.
     let selected = match crate::dev::list::state(true).and_then(|rows| {
         if own

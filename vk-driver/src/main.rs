@@ -59,6 +59,7 @@ mod iso9660;
 mod jobctx;
 mod jobevents;
 mod libkrun_sys;
+mod lifecycle;
 mod local;
 mod manager;
 mod mkoci;
@@ -735,7 +736,7 @@ enum PublishAction {
         ///
         /// By name, as `vk list --wide` shows it; the service must be running. Reported as
         /// `via` by `vk publish list --json` and in `vk list --json`'s `published`.
-        #[arg(long, visible_alias = "service", value_name = "NAME")]
+        #[arg(long = "service", visible_alias = "via", value_name = "NAME")]
         via: Option<String>,
     },
     /// List the publishers running for a state dir
@@ -1375,10 +1376,10 @@ enum Cmd {
     ///
     /// Prints its reply, or exits non-zero if it does not answer — a liveness check that
     /// exercises the agent protocol, stronger than a socket stat. Selects the VM whose project
-    /// is the current directory by default; pass a DIR to select by project directory. A
-    /// raw agent address (`vsock-auto://DIR/vsock.sock:4444`) probes it directly, for
-    /// plumbing that already knows the socket.
-    #[command(display_order = 7)]
+    /// is the current directory by default; pass a name, a pid or a directory to select
+    /// another. A raw agent address (`vsock-auto://DIR/vsock.sock:4444`) probes it directly,
+    /// for plumbing that already knows the socket. `vk status` is the same command.
+    #[command(name = "ping", alias = "status", display_order = 7)]
     Status {
         /// which VM: a name, a pid, a project directory, or a raw agent address
         ///
@@ -1527,13 +1528,13 @@ enum Cmd {
     /// Publish a port on the guest's own network to the host
     ///
     /// Accepts connections on `--listen` and, for each one, asks the target VM's agent —
-    /// over the same exec control channel `vk exec`/`vk status` use — to dial `--to` and
+    /// over the same exec control channel `vk exec`/`vk ping` use — to dial `--to` and
     /// splice raw bytes back, reusing that already-open channel for the relay. The VM is
-    /// selected as `vk exec` selects it (a directory or a raw agent address; a compose
-    /// sibling is `--via` here, where `vk exec` says `--service`), and `--to` can name any
-    /// address that VM's own network reaches — a
-    /// LAN peer's own compose hostname included, resolved through that VM's own DNS:
-    /// `vk publish --via devcontainer --listen tcp://127.0.0.1:8443 --to tcp://runner:443`.
+    /// selected as `vk exec` selects it (a name, a pid, a directory or a raw agent address;
+    /// a compose service with `NAME/SERVICE` or `--service`), and `--to` can name any
+    /// address that VM's own network reaches — a LAN peer's own compose hostname included,
+    /// resolved through that VM's own DNS:
+    /// `vk publish app/devcontainer --listen tcp://127.0.0.1:8443 --to tcp://runner:443`.
     ///
     /// That form runs in the foreground and goes with the terminal; `vk publish ensure` and
     /// its siblings keep one running in the background instead.
@@ -1549,7 +1550,7 @@ enum Cmd {
         /// By name, as `vk list --wide` shows it; the service must be running. This form
         /// records nothing, so nothing reports it; `vk publish ensure --via` is reported as
         /// `via`.
-        #[arg(long, visible_alias = "service", value_name = "NAME")]
+        #[arg(long = "service", visible_alias = "via", value_name = "NAME")]
         via: Option<String>,
         /// Local address to accept connections on (tcp://host:port, a unix path, ...)
         #[arg(long, required = true)]
@@ -2598,6 +2599,69 @@ enum Cmd {
         #[arg(long, default_value_t = 210, value_name = "SECS")]
         timeout: u64,
     },
+    /// Start a VM vk knows, or one of its compose services
+    ///
+    /// A dev environment boots from its workspace's config (`vk dev up` there); a run from the
+    /// recipe it recorded (`run.json`: the same `vk run` arguments, in the same directory,
+    /// now in the background); a compose service starts in its VM, which starts first when
+    /// it is down. Starting what runs is a no-op.
+    #[command(display_order = 8)]
+    Start {
+        /// the VMs to start, as `vk list` names them (`NAME/SERVICE` for a service)
+        #[arg(value_name = "REF", required = true)]
+        targets: Vec<std::ffi::OsString>,
+    },
+    /// Stop a VM, then start it again
+    #[command(display_order = 8)]
+    Restart {
+        /// the VM, as `vk list` names it (`NAME/SERVICE` for a service)
+        #[arg(value_name = "REF")]
+        target: std::ffi::OsString,
+        /// seconds to wait for it to go down
+        #[arg(long, default_value_t = 210, value_name = "SECS")]
+        timeout: u64,
+    },
+    /// Remove a stopped VM: its state, and its name
+    ///
+    /// A dev environment's state directory goes — storage, keys and all — after a preview
+    /// and a question (`--yes` skips it); a run's state directory goes when vk made it, and
+    /// only its recipe and name when it is a `--state-dir` of yours; a compose service's
+    /// `svc-<name>/` goes, so it starts afresh. A running VM is refused unless `--force`.
+    #[command(display_order = 8)]
+    Rm {
+        /// the VMs to remove, as `vk list` names them (`NAME/SERVICE` for a service)
+        #[arg(value_name = "REF", required = true)]
+        targets: Vec<std::ffi::OsString>,
+        /// stop a running VM first
+        #[arg(short = 'f', long)]
+        force: bool,
+        /// remove a dev environment without asking
+        #[arg(short = 'y', long)]
+        yes: bool,
+        /// seconds to wait for a VM `--force` stops
+        #[arg(long, default_value_t = 210, value_name = "SECS")]
+        timeout: u64,
+    },
+    /// Remove a dev environment's boot images or persistent data, keeping the environment
+    ///
+    /// What `vk dev prune NAME` does: boot images by default, `--storage` its persistent
+    /// roots, overlays, disks and managed directories, `--all` both. Stop it first.
+    #[command(display_order = 8)]
+    Reset {
+        /// the dev environment, as `vk list` names it
+        #[arg(value_name = "REF")]
+        target: String,
+        #[command(flatten)]
+        options: crate::dev::prune::Options,
+    },
+    /// Give a VM another name
+    #[command(display_order = 8)]
+    Rename {
+        /// its name now
+        old: String,
+        /// the name it takes: a-z, 0-9, `.`, `_`, `-`, at most 40, not all digits
+        new: String,
+    },
     /// Reboot running vk VM(s) in place
     ///
     /// Asks the guest to reboot (`vk-agent reboot` over vsock); the VM comes back on the
@@ -3229,12 +3293,12 @@ fn paths_report(cfg: &Config, gitlab: bool) -> anyhow::Result<String> {
     let state_dir = effective_state_dir(cfg)?;
     writeln!(
         out,
-        "state dir       {} ({state_note})",
+        "data dir        {} ({state_note})",
         state_dir.display()
     )?;
     writeln!(
         out,
-        "                the root of everything vk stores on this host"
+        "                the root of the caches and records vk keeps on this host"
     )?;
     writeln!(
         out,
@@ -3353,11 +3417,38 @@ fn paths_report(cfg: &Config, gitlab: bool) -> anyhow::Result<String> {
     )?;
     writeln!(
         out,
-        "                one entry per `vk run --state-dir` VM; `vk list`/`vk stop` read it"
+        "                one entry per running `vk run --state-dir` VM; `vk list`/`vk stop` read it"
     )?;
     writeln!(
         out,
         "                (self-pruned as VMs exit — no `vk gc` needed)"
+    )?;
+    writeln!(
+        out,
+        "runs ledger     {} (default: $XDG_DATA_HOME/virtkit/runs)",
+        crate::run::default_data_base()?.join("runs").display()
+    )?;
+    writeln!(
+        out,
+        "                the root images runs built into their state dirs, for `vk gc`"
+    )?;
+    writeln!(out)?;
+    writeln!(
+        out,
+        "VM state        {} (default: $XDG_STATE_HOME/virtkit)",
+        crate::names::state_base()?.display()
+    )?;
+    writeln!(
+        out,
+        "  dev/          one state dir per dev environment (`vk dev list`)"
+    )?;
+    writeln!(
+        out,
+        "  run/          state dirs of runs named with --name or started with --detach"
+    )?;
+    writeln!(
+        out,
+        "  names/        the VM names `vk list` prints: a link per name to its state dir"
     )?;
     if let Some(repo) = cfg.registry.as_ref().and_then(|r| r.local_root()) {
         writeln!(
@@ -3645,6 +3736,44 @@ async fn cli_main(cli: Cli) -> ExitCode {
             Ok(report) => write_report(&report),
             Err(e) => fail(&e, 2),
         };
+    }
+    match &cli.cmd {
+        Cmd::Start { targets } => {
+            return lifecycle::run(lifecycle::Verb::Start, targets, 210, false);
+        }
+        Cmd::Restart { target, timeout } => return lifecycle::restart(target, *timeout),
+        Cmd::Rm {
+            targets,
+            force,
+            yes,
+            timeout,
+        } => {
+            return lifecycle::run(lifecycle::Verb::Rm { force: *force }, targets, *timeout, *yes);
+        }
+        Cmd::Reset { target, options } => {
+            return match crate::dev::prune::run_by_name(target, options) {
+                Ok(report) => write_report(&report),
+                Err(e) => fail(&e, 1),
+            };
+        }
+        Cmd::Rename { old, new } => {
+            return match lifecycle::rename(old, new) {
+                Ok(report) => write_report(&report),
+                Err(e) => fail(&e, 1),
+            };
+        }
+        // A name — a VM's or a service's — stops through its kind: `vk dev stop` for a dev
+        // environment, its service manager for a service.
+        Cmd::Stop {
+            target: Some(target),
+            timeout,
+            ..
+        } if matches!(vms::Ref::parse(target), Ok(vms::Ref::Name { .. }))
+            && !Path::new(target).is_dir() =>
+        {
+            return lifecycle::run(lifecycle::Verb::Stop, &[target.clone()], *timeout, false);
+        }
+        _ => {}
     }
     if let Cmd::Stop {
         target,
@@ -5507,7 +5636,7 @@ async fn cli_main(cli: Cli) -> ExitCode {
             let (Some(listen), Some(to)) = (listen, to) else {
                 return fail(&anyhow::anyhow!("--listen and --to are required"), 2);
             };
-            let addr = match resolve_exec_addr(target.as_deref(), via.as_deref(), "--via") {
+            let addr = match resolve_exec_addr(target.as_deref(), via.as_deref(), "--service") {
                 Ok(a) => a,
                 Err(e) => return fail(&e, 2),
             };
@@ -5546,6 +5675,11 @@ async fn cli_main(cli: Cli) -> ExitCode {
         | Cmd::DockerHash { .. }
         | Cmd::Fingerprint { .. }
         | Cmd::List { .. }
+        | Cmd::Start { .. }
+        | Cmd::Restart { .. }
+        | Cmd::Rm { .. }
+        | Cmd::Reset { .. }
+        | Cmd::Rename { .. }
         | Cmd::Stop { .. }
         | Cmd::Reboot { .. }
         | Cmd::Pause { .. }
@@ -6488,8 +6622,8 @@ fn resolve_exec_addr_at(state_dir: &Path, via: Option<&str>) -> anyhow::Result<S
         );
     };
     // `ensure` canonicalizes the state dir, so only a hand-run `serve` reaches this
-    // message — and `--via` is the right name there too.
-    resolve_exec_addr(Some(target), via, "--via")
+    // message — and `--service` is the right name there too.
+    resolve_exec_addr(Some(target), via, "--service")
 }
 
 /// The managed half of `vk publish`. Each action names its VM by state dir — the same
@@ -7020,6 +7154,30 @@ mod tests {
     // `vk paths --gitlab` must report the jobs root the executor actually uses:
     // Config::state_dir() (/var/lib/virtkit when unset), not the XDG dev default
     // `vk run` caches under.
+    #[test]
+    fn paths_report_names_the_data_dir_and_where_vms_keep_state() {
+        let report = paths_report(&config::Config::default(), false).unwrap();
+        assert!(report.contains("\ndata dir        "), "{report}");
+        assert!(!report.contains("\nstate dir "), "{report}");
+        for line in ["runs ledger     ", "VM state        ", "  dev/  ", "  run/  ", "  names/  "] {
+            assert!(report.contains(line), "{line}: {report}");
+        }
+    }
+
+    #[test]
+    fn ping_is_the_probe_and_status_still_reaches_it() {
+        for name in ["ping", "status"] {
+            let cli = Cli::try_parse_from(["vk", name, "app"]).unwrap();
+            assert!(matches!(cli.cmd, Cmd::Status { .. }), "{name}");
+        }
+        let cli = Cli::try_parse_from([
+            "vk", "publish", "--service", "db", "--listen", "tcp://127.0.0.1:1", "--to",
+            "tcp://x:2",
+        ])
+        .unwrap();
+        assert!(matches!(cli.cmd, Cmd::Publish { via: Some(ref s), .. } if s == "db"));
+    }
+
     #[test]
     fn paths_report_gitlab_matches_jobctx() {
         let ctx =
@@ -8009,14 +8167,19 @@ mod tests {
                 "list",
                 "logs",
                 "pause",
+                "ping",
                 "publish",
                 "reboot",
+                "rename",
+                "reset",
+                "restart",
                 "resume",
+                "rm",
                 "run",
                 "snapshot",
                 "ssh",
                 "ssh-config",
-                "status",
+                "start",
                 "stop",
                 "toolchain",
                 "update"
