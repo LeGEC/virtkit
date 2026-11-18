@@ -1957,7 +1957,7 @@ case "$1 $2" in
  {"name":"../evil","dir":"/x","workspace":null,"environment":null,"status":"stopped","flags":[]}]
 JSON
 ;;
-"dev up"|"dev gc"|"dev stop") ;;
+"dev up"|"rm --yes"|"stop --") ;;
 *) exit 3 ;;
 esac"#,
     );
@@ -2079,7 +2079,7 @@ esac"#,
     assert_eq!(reply.status, 200, "{}", reply.body);
     audited(
         &hub,
-        "`vk dev gc --yes -- old-2222` on dev environment old-2222 succeeded",
+        "`vk rm --yes -- old-2222` on dev environment old-2222 succeeded",
     )
     .await;
 
@@ -2110,7 +2110,7 @@ esac"#,
     assert_eq!(reply.status, 200, "{}", reply.body);
     audited(
         &hub,
-        "`vk dev stop -- run-3333` on dev environment run-3333 succeeded",
+        "`vk stop -- run-3333` on dev environment run-3333 succeeded",
     )
     .await;
 
@@ -2129,7 +2129,7 @@ esac"#,
     );
     let ran = std::fs::read_to_string(&ran).unwrap();
     assert!(!ran.contains("evil"), "{ran}");
-    assert_eq!(ran.matches("dev stop").count(), 1, "{ran}");
+    assert_eq!(ran.matches("stop -- ").count(), 1, "{ran}");
     let _ = std::fs::remove_dir_all(vk.parent().unwrap());
 }
 

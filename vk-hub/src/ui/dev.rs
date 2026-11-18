@@ -39,7 +39,7 @@ pub(super) fn valid_dev_name(name: &str) -> bool {
 }
 
 /// A dev environment's name: the one `vk` gives it, else its state dir's own, when the list
-/// shows that as it is. Either is what `vk dev list` names it and `vk dev stop` takes.
+/// shows that as it is. Either is what `vk dev list` names it and `vk stop` takes.
 pub(super) fn dev_name(w: &Workload) -> Option<String> {
     if let Some(name) = w.name.as_deref().filter(|n| valid_dev_name(n)) {
         return Some(name.to_string());

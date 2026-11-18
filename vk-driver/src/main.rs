@@ -2602,15 +2602,19 @@ enum Cmd {
     },
     /// Start a VM vk knows, or one of its compose services
     ///
-    /// A dev environment boots from its workspace's config (`vk dev up` there); a run from the
-    /// recipe it recorded (`run.json`: the same `vk run` arguments, in the same directory,
+    /// A dev environment boots from its workspace's config (`vk dev start` there); a run from
+    /// the recipe it recorded (`run.json`: the same `vk run` arguments, in the same directory,
     /// now in the background); a compose service starts in its VM, which starts first when
-    /// it is down. Starting what runs is a no-op.
+    /// it is down. Starting what runs is a no-op. Only what is already built boots: an image
+    /// that would have to be built fails the start (exit 3) unless `--build`.
     #[command(display_order = 8)]
     Start {
         /// the VMs to start, as `vk list` names them (`NAME/SERVICE` for a service)
         #[arg(value_name = "REF", required = true)]
         targets: Vec<std::ffi::OsString>,
+        /// build what is not built yet, as `vk dev up` does, instead of failing (exit 3)
+        #[arg(long)]
+        build: bool,
     },
     /// Stop a VM, then start it again
     #[command(display_order = 8)]
@@ -3758,8 +3762,13 @@ async fn cli_main(cli: Cli) -> ExitCode {
         };
     }
     match &cli.cmd {
-        Cmd::Start { targets } => {
-            return lifecycle::run(lifecycle::Verb::Start, targets, 210, false);
+        Cmd::Start { targets, build } => {
+            return lifecycle::run(
+                lifecycle::Verb::Start { build: *build },
+                targets,
+                210,
+                false,
+            );
         }
         Cmd::Restart { target, timeout } => return lifecycle::restart(target, *timeout),
         Cmd::Rm {
